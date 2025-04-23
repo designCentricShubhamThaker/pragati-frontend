@@ -48,7 +48,7 @@ const OrdersList = ({ orderType }) => {
   const [newOrderAlert, setNewOrderAlert] = useState(null);
 
   const { user } = useAuth();
-  const { socket } = useSocket();
+  const { socket, isConnected } = useSocket();
 
   const teamType = useMemo(() => determineTeamType(user.team), [user.team]);
   const teamColumns = useMemo(() => getTeamTypeSpecificColumns(teamType), [teamType]);
@@ -56,41 +56,6 @@ const OrdersList = ({ orderType }) => {
   const handleClose = () => {
     setShowModal(false);
   };
-
-  useEffect(() => {
-    const handleOrderDeleted = (event) => {
-      const { order } = event.detail;
-      console.log(`🗑️ Order deletion received in OrdersList: Order #${order.order_number}`);
-      setOrders(prevOrders =>
-        prevOrders.filter(prevOrder => prevOrder._id !== order._id)
-      );
-    };
-
-    if (socket) {
-      console.log("Setting up socket listener for 'order-deleted'");
-      socket.on('order-deleted', (order) => {
-        console.log(`🔌 Socket received deleted order: Order #${order.order_number}`);
-
-        setOrders(prevOrders =>
-          prevOrders.filter(prevOrder => prevOrder._id !== order._id)
-        );
-
-        console.log('order deletedd lamaooooooo')
-
-      });
-    }
-
-    window.addEventListener('orderDeleted', handleOrderDeleted);
-    return () => {
-
-      window.removeEventListener('orderDeleted', handleOrderDeleted);
-
-      if (socket) {
-        console.log("Cleaning up socket listener for 'order-deleted'");
-        socket.off('order-deleted');
-      }
-    };
-  }, [socket]);
 
   useEffect(() => {
     const storedOrders = getOrdersFromLocalStorage(user);
@@ -110,144 +75,10 @@ const OrdersList = ({ orderType }) => {
     return cleanup;
   }, [user]);
 
-  useEffect(() => {
-    const handleNewOrder = (event) => {
-      const { order, targetTeams } = event.detail;
-      console.log(`📩 New order received in OrdersList: Order #${order.order_number}`);
-      console.log(`Current team: ${teamType}, target teams:`, targetTeams || 'not specified');
-    
-      // Check if this order is relevant for the current team
-      const isRelevant = isOrderRelevantForTeam(order, teamType);
-      console.log(`Is relevant for ${teamType} team? ${isRelevant}`);
-    
-      if (isRelevant) {
-        setOrders(prevOrders => {
-          const exists = prevOrders.some(o => o._id === order._id);
-          if (exists) return prevOrders;
-          
-          console.log(`✅ Adding new order #${order.order_number} to ${teamType} team's list`);
-          const newOrders = [...prevOrders, order];
-          
-          // Save to localStorage
-          saveOrdersToLocalStorage(user, newOrders);
-          
-          // Show notification
-          setNewOrderAlert({
-            id: order._id,
-            number: order.order_number,
-            timestamp: new Date().toISOString()
-          });
-          
-          // Clear notification after 5 seconds
-          setTimeout(() => setNewOrderAlert(null), 5000);
-          
-          return newOrders; 
-        });
-      }
-    };
-
-    const handleOrderUpdate = (event) => {
-      const { order } = event.detail;
-
-      console.log(`📝 Order update received: Order #${order.order_number}`);
-
-      setOrders(prevOrders =>
-        prevOrders.map(prevOrder =>
-          prevOrder._id === order._id ? { ...order } : prevOrder
-        )
-      );
-    };
-
-    const handleOrderEdited = (event) => {
-      const { order } = event.detail;
-
-      console.log(`✏️ Edited order received in OrdersList: Order #${order.order_number}`);
-
-      setOrders(prevOrders => {
-        const updatedOrders = prevOrders.map(prevOrder =>
-          prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
-        );
-
-        saveOrdersToLocalStorage(user, updatedOrders);
-
-        const syncEvent = new CustomEvent('localStorageUpdated', {
-          detail: {
-            key: generateLocalStorageKey(user),
-            orders: updatedOrders
-          }
-        });
-        window.dispatchEvent(syncEvent);
-
-        return updatedOrders;
-      });
-    };
-
-    if (socket) {
-      socket.on('new-order', (data) => {
-        console.log(`🔌 Socket directly received new order: #${data.order.order_number}`);
-        const orderEvent = new CustomEvent('orderCreated', {
-          detail: {
-            order: data.order,
-            createdBy: data._meta?.createdBy,
-            timestamp: data._meta?.timestamp,
-            targetTeams: data._meta?.targetTeams
-          }
-        });
-        window.dispatchEvent(orderEvent);
-      });
-    }
-
-    window.addEventListener('orderCreated', handleNewOrder);
-    window.addEventListener('orderUpdated', handleOrderUpdate);
-    window.addEventListener('orderEdited', handleOrderEdited);
-
-    return () => {
-      window.removeEventListener('orderCreated', handleNewOrder);
-      window.removeEventListener('orderUpdated', handleOrderUpdate);
-      window.removeEventListener('orderEdited', handleOrderEdited);
-      socket.off('new-order');
-    };
-  }, [teamType, user]);
-
-
-  useEffect(() => {
-    if (socket) {
-      console.log("Setting up socket listener for 'order-edited'");
-      socket.on('order-edited', (order) => {
-        console.log(`🔌 Socket received edited order: Order #${order.order_number}`);
-
-        setOrders(prevOrders => {
-          const updatedOrders = prevOrders.map(prevOrder =>
-            prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
-          );
-
-          saveOrdersToLocalStorage(user, updatedOrders);
-          const syncEvent = new CustomEvent('localStorageUpdated', {
-            detail: {
-              key: generateLocalStorageKey(user),
-              orders: updatedOrders
-            }
-          });
-          window.dispatchEvent(syncEvent);
-
-          return updatedOrders;
-        });
-      });
-
-      return () => {
-        console.log("Cleaning up socket listener for 'order-edited'");
-        socket.off('order-edited');
-      };
-    }
-  }, [socket, user]);
 
   const isOrderRelevantForTeam = useCallback((order, teamType) => {
     if (!order || !order.order_details) return false;
-    
-  
     if (user.role === 'admin' || user.role === 'dispatcher') return true;
-    
-
     switch (teamType?.toLowerCase()) {
       case 'glass':
         return order.order_details.glass && order.order_details.glass.length > 0;
@@ -286,28 +117,209 @@ const OrdersList = ({ orderType }) => {
     }
   }, [orderType, user]);
 
-  const handleOrderUpdated = useCallback((updatedOrder) => {
-    const updatedOrders = orders.map(order =>
-      order._id === updatedOrder._id ? {
-        ...updatedOrder,
-        lastUpdatedTimestamp: new Date().toISOString()
-      } : order
-    );
-    saveOrdersToLocalStorage(user, updatedOrders);
-    setOrders(updatedOrders);
-
-    const event = new CustomEvent('localStorageUpdated', {
-      detail: {
-        key: generateLocalStorageKey(user),
-        orders: updatedOrders
-      }
-    });
-    window.dispatchEvent(event);
-  }, [orders, user]);
-
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    // Handle new order from socket
+    const handleSocketNewOrder = (data) => {
+      console.log(`🔌 Socket received new order: Order #${data.order?.order_number}`);
+      
+      if (isOrderRelevantForTeam(data.order)) {
+        setOrders(prevOrders => {
+          // Check if order already exists
+          const exists = prevOrders.some(o => o._id === data.order._id);
+          if (exists) return prevOrders;
+          
+          // Add new order and save to localStorage
+          const newOrders = [...prevOrders, data.order];
+          saveOrdersToLocalStorage(user, newOrders);
+          
+          // Show notification
+          setNewOrderAlert({
+            id: data.order._id,
+            number: data.order.order_number,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Clear notification after 5 seconds
+          setTimeout(() => setNewOrderAlert(null), 5000);
+          
+          return newOrders;
+        });
+      }
+    };
+
+    // Handle order update from socket
+    const handleSocketOrderUpdated = (data) => {
+      console.log(`🔌 Socket received updated order: Order #${data.order?.order_number}`);
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(prevOrder =>
+          prevOrder._id === data.order._id 
+            ? { ...data.order, lastUpdatedTimestamp: new Date().toISOString() } 
+            : prevOrder
+        );
+        
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
+    };
+
+    // Handle order edit from socket
+    const handleSocketOrderEdited = (order) => {
+      console.log(`🔌 Socket received edited order: Order #${order?.order_number}`);
+      
+      if (!isOrderRelevantForTeam(order ,teamType)) return;
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(prevOrder =>
+          prevOrder._id === order._id 
+            ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } 
+            : prevOrder
+        );
+        
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
+    };
+
+    // Handle order deletion from socket
+    const handleSocketOrderDeleted = (data) => {
+      console.log(`🔌 Socket received deleted order: Order #${data.order?.order_number}`);
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.filter(order => order._id !== data.order._id);
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
+    };
+
+    // Register socket event listeners
+    socket.on('new-order', handleSocketNewOrder);
+    socket.on('order-updated', handleSocketOrderUpdated);
+    socket.on('order-edited', handleSocketOrderEdited);
+    socket.on('order-deleted', handleSocketOrderDeleted);
+
+    // Clean up socket event listeners
+    return () => {
+      socket.off('new-order', handleSocketNewOrder);
+      socket.off('order-updated', handleSocketOrderUpdated);
+      socket.off('order-edited', handleSocketOrderEdited);
+      socket.off('order-deleted', handleSocketOrderDeleted);
+    };
+  }, [socket, user, isOrderRelevantForTeam ,teamType]);
+
+  useEffect(() => {
+
+    const handleNewOrder = (event) => {
+      const { order } = event.detail;
+      
+      if (isOrderRelevantForTeam(order ,teamType)) {
+        setOrders(prevOrders => {
+
+          const exists = prevOrders.some(o => o._id === order._id);
+          if (exists) return prevOrders;
+          
+          const newOrders = [...prevOrders, order];
+          saveOrdersToLocalStorage(user, newOrders);
+          setNewOrderAlert({
+            id: order._id,
+            number: order.order_number,
+            timestamp: new Date().toISOString()
+          });
+          
+          setTimeout(() => setNewOrderAlert(null), 5000);
+          
+          return newOrders;
+        });
+      }
+    };
+
+    const handleOrderUpdate = (event) => {
+      const { order } = event.detail;
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(prevOrder =>
+          prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
+        );
+        
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
+    };
+
+    const handleOrderEdited = (event) => {
+      const { order } = event.detail;
+      if (!isOrderRelevantForTeam(order ,teamType)) return;
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(prevOrder =>
+          prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
+        );
+        
+        saveOrdersToLocalStorage(user, updatedOrders);
+        
+        const syncEvent = new CustomEvent('localStorageUpdated', {
+          detail: {
+            key: generateLocalStorageKey(user),
+            orders: updatedOrders
+          }
+        });
+        window.dispatchEvent(syncEvent);
+        
+        return updatedOrders;
+      });
+    };
+
+    const handleOrderDeleted = (event) => {
+      const { order } = event.detail;
+      
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.filter(prevOrder => prevOrder._id !== order._id);
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
+    };
+
+    window.addEventListener('orderCreated', handleNewOrder);
+    window.addEventListener('orderUpdated', handleOrderUpdate);
+    window.addEventListener('orderEdited', handleOrderEdited);
+    window.addEventListener('orderDeleted', handleOrderDeleted);
+
+    return () => {
+      window.removeEventListener('orderCreated', handleNewOrder);
+      window.removeEventListener('orderUpdated', handleOrderUpdate);
+      window.removeEventListener('orderEdited', handleOrderEdited);
+      window.removeEventListener('orderDeleted', handleOrderDeleted);
+    };
+  }, [user, isOrderRelevantForTeam ,teamType]);
+
+  const handleOrderUpdated = useCallback((updatedOrder) => {
+    setOrders(prevOrders => {
+      const updatedOrders = prevOrders.map(order =>
+        order._id === updatedOrder._id ? {
+          ...updatedOrder,
+          lastUpdatedTimestamp: new Date().toISOString()
+        } : order
+      );
+
+      saveOrdersToLocalStorage(user, updatedOrders);
+      
+      const event = new CustomEvent('localStorageUpdated', {
+        detail: {
+          key: generateLocalStorageKey(user),
+          orders: updatedOrders
+        }
+      });
+      window.dispatchEvent(event);
+
+      return updatedOrders;
+    });
+  }, [user]);
 
   const handleEditOrder = useCallback((order) => {
     setSelectedOrder(order);
