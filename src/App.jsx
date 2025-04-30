@@ -5,7 +5,7 @@ import Unaothorized from "./pages/Unaothorized";
 import DispatcherDashboard from "./DispatcherDashboard";
 
 import TeamView from "./TeamView";
-import SubteamView from "./SubteamView";
+// import SubteamView from "./SubteamView";
 import NotFound from "./NotFound";
 import { AuthProvider, useAuth } from "./context/auth";
 import { DynamicRedirect, ProtectedRoute } from "./ProtectedRoute.jsx";
@@ -35,9 +35,9 @@ const App = () => {
               <Route index element={<TeamView />} />
             </Route>
 
-            <Route path="/:teamId/:subteamId" element={<ProtectedRoute />}>
+            {/* <Route path="/:teamId/:subteamId" element={<ProtectedRoute />}>
               <Route index element={<SubteamView />} />
-            </Route>
+            </Route> */}
 
             <Route path="*" element={<NotFound />} />
           </Routes>

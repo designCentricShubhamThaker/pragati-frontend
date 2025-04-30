@@ -11,7 +11,7 @@ import { CapData } from '../data/CapData';
 import axios from 'axios';
 import { useSocket } from '../context/SocketContext.jsx';
 
-const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
+const EditDispatcherOrder = ({ onClose, orders, onSave, user }) => {
   const dispatchers = ["Rajesh Kumar", "Anita Sharma"];
   const customers = [
     "Amit Verma",
@@ -31,16 +31,16 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
   const [filteredGlassData, setFilteredGlassData] = useState(glassData);
   const [capSearches, setCapSearches] = useState({});
   const [filteredCapData, setFilteredCapData] = useState(CapData);
-  const [orderNumber, setOrderNumber] = useState(orderData.order_number || "");
-  const [dispatcherName, setDispatcherName] = useState(orderData.dispatcher_name || "");
-  const [customerName, setCustomerName] = useState(orderData.customer_name || "");
+  const [orderNumber, setOrderNumber] = useState(orders.order_number || "");
+  const [dispatcherName, setDispatcherName] = useState(orders.dispatcher_name || "");
+  const [customerName, setCustomerName] = useState(orders.customer_name || "");
   const boxNames = ["Box A", "Box B", "Box C", "Box D"];
   const pumpNames = ["Pump A", "Pump B", "Pump C", "Pump D"];
   const capProcessOptions = ["Metalised", "Non Metalised", "Metal and Assembly", "Non Metal and Assembly"];
 
   const { notifyEditOrder } = useSocket()
   const capMaterialOptions = ["Plastic", "Aluminium", "Other"];
-  const { isConnected  } = useSocket()
+  const { isConnected } = useSocket()
   const [orderDetails, setOrderDetails] = useState({
     items: [{
       glass_name: "N/A",
@@ -74,13 +74,13 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
   });
 
   useEffect(() => {
-    setOrderNumber(orderData.order_number || "");
-    setDispatcherName(orderData.dispatcher_name || "");
-    setCustomerName(orderData.customer_name || "");
+    setOrderNumber(orders.order_number || "");
+    setDispatcherName(orders.dispatcher_name || "");
+    setCustomerName(orders.customer_name || "");
 
-    if (orderData.order_details && orderData.order_details.glass && orderData.order_details.glass.length > 0) {
+    if (orders.order_details && orders.order_details.glass && orders.order_details.glass.length > 0) {
 
-      const glassItems = orderData.order_details.glass.map(item => ({
+      const glassItems = orders.order_details.glass.map(item => ({
         glass_name: item.glass_name || "N/A",
         quantity: item.quantity || "",
         weight: item.weight || "",
@@ -105,27 +105,27 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
       setGlassSearches(searches);
     }
 
-    if (orderData.order_details && orderData.order_details.caps && orderData.order_details.caps.length > 0) {
+    if (orders.order_details && orders.order_details.caps && orders.order_details.caps.length > 0) {
       setOrderDetails(prevDetails => ({
         ...prevDetails,
-        caps: [...orderData.order_details.caps]
+        caps: [...orders.order_details.caps]
       }));
     }
 
-    if (orderData.order_details && orderData.order_details.boxes && orderData.order_details.boxes.length > 0) {
+    if (orders.order_details && orders.order_details.boxes && orders.order_details.boxes.length > 0) {
       setOrderDetails(prevDetails => ({
         ...prevDetails,
-        boxes: [...orderData.order_details.boxes]
+        boxes: [...orders.order_details.boxes]
       }));
     }
 
-    if (orderData.order_details && orderData.order_details.pumps && orderData.order_details.pumps.length > 0) {
+    if (orders.order_details && orders.order_details.pumps && orders.order_details.pumps.length > 0) {
       setOrderDetails(prevDetails => ({
         ...prevDetails,
-        pumps: [...orderData.order_details.pumps]
+        pumps: [...orders.order_details.pumps]
       }));
     }
-  }, [orderData]);
+  }, [orders]);
 
   const handleDetailChange = (category, index, field, value) => {
     const updatedDetails = { ...orderDetails };
@@ -201,7 +201,7 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
   const handleSave = async () => {
     try {
 
-      const currentOrderDetails = orderData.order_details || {};
+      const currentOrderDetails = orders.order_details || {};
 
       const mergedOrderDetails = { ...currentOrderDetails };
 
@@ -218,8 +218,9 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
             cap_name: cap.cap_name,
             neck_size: cap.neck_size,
             quantity: cap.quantity,
-            process: cap.cap_process,
-            material: cap.cap_material,
+            process: cap.process,
+            material: cap.material,
+
             team: cap.team || "Cap Manufacturing Team",
             status: cap.status || "Pending",
             team_tracking: cap.team_tracking || undefined,
@@ -290,7 +291,7 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
       }
 
       const updatedOrder = {
-        ...orderData,
+        ...orders,
         order_number: orderNumber,
         dispatcher_name: dispatcherName,
         customer_name: customerName,
@@ -322,7 +323,7 @@ const EditDispatcherOrder = ({ onClose, orderData, onSave, user }) => {
     } catch (error) {
       console.error("Update failed:", error);
       alert("Failed to update order in DB. Changes saved locally.");
-      onSave(orderData);
+      onSave(orders);
       onClose();
     }
   };
@@ -683,7 +684,8 @@ ${orderDetails.items.length === 1
                                 <div className="relative">
                                   <select
                                     value={cap.process}
-                                    onChange={(e) => handleDetailChange('caps', index, 'cap_process', e.target.value)}
+                                    onChange={(e) => handleDetailChange('caps', index, 'process', e.target.value)}
+
                                     className="w-full appearance-none px-4 py-3 bg-white border border-orange-300 rounded-md text-sm 
                           focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                   >
@@ -713,7 +715,7 @@ ${orderDetails.items.length === 1
                                 <div className="relative">
                                   <select
                                     value={cap.material}
-                                    onChange={(e) => handleDetailChange('caps', index, 'cap_material', e.target.value)}
+                                    onChange={(e) => handleDetailChange('caps', index, 'material', e.target.value)}
                                     className="w-full appearance-none px-4 py-3 bg-white border border-orange-300 rounded-md text-sm 
                           focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                   >

@@ -5,18 +5,18 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/auth'
 import {
-  determineTeamType,
   getOrderItems,
   getItemName
 } from '../utils/OrderUtils';
-import { 
-  updateLocalStorageOrders, 
-  getOrdersFromLocalStorage, 
+import {
+  updateLocalStorageOrders,
+  getOrdersFromLocalStorage,
   setupLocalStorageSync,
   generateLocalStorageKey
 } from '../utils/LocalStorageUtils'
+import { useSocket } from '../context/SocketContext'
+import { ShoppingBag } from 'lucide-react';
 
-// New utility function to create order update log
 const createOrderUpdateLog = (order, teamType, updates) => {
   return {
     orderId: order._id,
@@ -27,10 +27,9 @@ const createOrderUpdateLog = (order, teamType, updates) => {
   };
 };
 
-const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) => {
+const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, teamType }) => {
   const { user } = useAuth()
   const [order, setOrder] = useState(null);
-  const teamType = useMemo(() => determineTeamType(selectedOrder), [selectedOrder]);
   const [orderItems, setOrderItems] = useState([]);
   const [todaysQuantities, setTodaysQuantities] = useState({});
   const [previouslyCompleted, setPreviouslyCompleted] = useState({});
@@ -38,53 +37,55 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
   const [updateStatus, setUpdateStatus] = useState(null);
   const [completedQuantities, setCompletedQuantities] = useState({});
   const [isLoading, setIsLoading] = useState(true);
+  const { notifyOrderUpdate } = useSocket()
 
-  // Load order details from local storage
   useEffect(() => {
+    if (!selectedOrder) return;
+
     const localOrders = getOrdersFromLocalStorage(user);
     const localOrder = localOrders.find(o => o._id === selectedOrder._id);
-  
+
     if (localOrder) {
       console.log("Order data loaded from localStorage:", localOrder);
-  
       setOrder(localOrder);
       const localOrderItems = getOrderItems(localOrder, teamType);
       setOrderItems(localOrderItems);
-  
-      
+
       const initialPreviouslyCompleted = localOrderItems.reduce((acc, item) => {
         acc[item._id] = item.team_tracking?.total_completed_qty || 0;
         return acc;
       }, {});
-  
+
       setPreviouslyCompleted(initialPreviouslyCompleted);
     } else {
       console.log("Order not found in localStorage.");
     }
-  
+
     setIsLoading(false);
-  
+
     return () => {
       setOrder(null);
       setOrderItems([]);
       setPreviouslyCompleted({});
     };
   }, [selectedOrder, user, teamType]);
-  
 
   useEffect(() => {
+
+    if (!selectedOrder?._id) return;
     const cleanup = setupLocalStorageSync(user, (updatedOrders) => {
-      const updatedOrder = updatedOrders.find(o => o._id === selectedOrder?._id);
+
+      const updatedOrder = updatedOrders.find(o => o._id === selectedOrder._id);
       if (updatedOrder) {
-        setOrder(updatedOrder);
-        setOrderItems(getOrderItems(updatedOrder, teamType));
+        setOrder(currentOrder => updatedOrder);
+        setOrderItems(currentItems => getOrderItems(updatedOrder, teamType));
       }
-      // notifyDispatcher(updatedOrders);  // Notify dispatcher of changes
     });
-  
-    return () => cleanup(); 
+
+    return cleanup;
   }, [user, selectedOrder, teamType]);
-  
+
+
   const handleSaveChanges = useCallback(async () => {
     if (!order) {
       setUpdateStatus({
@@ -93,13 +94,13 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
       });
       return;
     }
-  
+
     console.log("Starting to save order changes...");
-  
+
     const hasValidUpdates = orderItems.some(
       item => (todaysQuantities[item._id] || 0) > 0
     );
-  
+
     if (!hasValidUpdates) {
       setUpdateStatus({
         type: "error",
@@ -107,7 +108,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
       });
       return;
     }
-  
+
     if (Object.keys(errors).length > 0) {
       setUpdateStatus({
         type: "error",
@@ -115,13 +116,13 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
       });
       return;
     }
-  
+
     setIsLoading(true);
     setUpdateStatus(null);
-  
+
     try {
       console.log("Preparing update payload...");
-      
+
       const updatePayload = {
         order_number: order.order_number,
         team_type: teamType,
@@ -133,16 +134,16 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
             [teamType + '_name']: item[teamType + '_name']
           }))
       };
-  
+
       console.log("Update payload:", updatePayload);
-  
+
       const response = await axios.patch(
         "http://localhost:5000/orders/update-progress",
         updatePayload
       );
-  
+
       console.log("Order progress successfully updated on backend:", response.data);
-  
+
       const updatedOrder = {
         ...order,
         team_tracking: {
@@ -159,20 +160,20 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
           ...order.order_details,
           [teamType]: order.order_details[teamType].map(item => {
             const todayQty = todaysQuantities[item._id] || 0;
-            
+
             if (todayQty <= 0) return item;
-            
+
             return {
               ...item,
               team_tracking: {
                 ...item.team_tracking,
                 total_completed_qty: (item.team_tracking?.total_completed_qty || 0) + todayQty,
-                // Add the new completed entry
+
                 completed_entries: [
                   ...(item.team_tracking?.completed_entries || []),
-                  { 
-                    qty_completed: todayQty, 
-                    timestamp: new Date().toISOString() 
+                  {
+                    qty_completed: todayQty,
+                    timestamp: new Date().toISOString()
                   }
                 ],
                 status: calculateItemStatus(item, todayQty)
@@ -181,44 +182,51 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
           })
         }
       };
-  
+
       console.log("Updated order before saving to localStorage:", updatedOrder);
-  
+
       const updateLog = createOrderUpdateLog(order, teamType, updatePayload.updates);
-      
-      // Update localStorage only after API succeeds
+
+      if (updatedOrder && updatedOrder.order_number) {
+        console.log("Sending order update via socket:", updatedOrder);
+        notifyOrderUpdate({
+          ...updatedOrder,
+        });
+      } else {
+        console.error("Invalid order update, not sending via socket:", updatedOrder);
+      }
+
       const localUpdatedOrders = updateLocalStorageOrders(user, [updatedOrder], teamType, updateLog);
       console.log("Order progress updated in localStorage:", localUpdatedOrders);
-
-      window.dispatchEvent(new CustomEvent('localStorageUpdated', { 
+      window.dispatchEvent(new CustomEvent('localStorageUpdated', {
         detail: { key: generateLocalStorageKey(user), orders: localUpdatedOrders }
       }));
-  
+
       if (onOrderUpdated) {
         const updatedOrderInStorage = localUpdatedOrders.find(o => o._id === order._id);
         onOrderUpdated(updatedOrderInStorage);
       }
-  
+
       setUpdateStatus({
         type: "success",
         message: "Order progress updated successfully!"
       });
-  
+
       setTodaysQuantities({});
       setCompletedQuantities({});
       setErrors({});
-  
+
       setTimeout(() => {
         onClose();
       }, 1500);
-  
+
     } catch (error) {
       console.error("Update error:", error);
       setUpdateStatus({
         type: "error",
         message: error.response?.data?.error || "Failed to update order progress. Please try again."
       });
-  
+
     } finally {
       setIsLoading(false);
     }
@@ -231,10 +239,10 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
     onClose,
     user,
     previouslyCompleted,
-    orderItems
+    orderItems,
+    notifyOrderUpdate
   ]);
-  
-  // Helper function to calculate item status
+
   const calculateItemStatus = (item, todayQty) => {
     const totalCompletedQty = (item.team_tracking?.total_completed_qty || 0) + todayQty;
     const totalRequiredQty = item.quantity;
@@ -244,7 +252,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
     } else if (totalCompletedQty > 0) {
       return 'Partially Completed';
     }
-    
+
     return 'Pending';
   };
 
@@ -286,20 +294,33 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
     return Math.min(100, Math.round((completed / total) * 100));
   };
 
-  // Loading state
   if (isLoading) {
     return (
-      <Dialog open={true} onClose={onClose} className="relative z-10">
-        <DialogBackdrop className="fixed inset-0 bg-gray-500/75 transition-opacity" />
-        <div className="fixed inset-0 z-10 w-screen overflow-y-auto flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin mb-4 mx-auto h-12 w-12 text-amber-600">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+      <Dialog open={true} onClose={onClose} className="relative z-50">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-all duration-300"></div>
+        <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8 max-w-md w-full transform transition-all">
+              <div className="flex flex-col items-center justify-center space-y-6">
+
+                <div className="relative h-16 w-16">
+                  <div className="absolute inset-0 rounded-full border-4 border-t-amber-500 border-r-transparent border-b-transparent border-l-transparent animate-spin"></div>
+                  <div className="absolute inset-1 rounded-full border-4 border-t-transparent border-r-amber-400 border-b-transparent border-l-transparent animate-spin animation-delay-150"></div>
+                  <div className="absolute inset-2 rounded-full border-4 border-t-transparent border-r-transparent border-b-amber-300 border-l-transparent animate-spin animation-delay-300"></div>
+                </div>
+
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Processing Your Order</h3>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Just a moment while we prepare your details...
+                  </p>
+                </div>
+
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1 overflow-hidden">
+                  <div className="bg-gradient-to-r from-amber-400 to-amber-600 h-1 rounded-full animate-pulse"></div>
+                </div>
+              </div>
             </div>
-            <p className="text-amber-600 font-medium">Loading order details...</p>
           </div>
         </div>
       </Dialog>
@@ -308,19 +329,14 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
 
   return (
     <Dialog open={true} onClose={onClose} className="relative z-10">
-      <DialogBackdrop
-        className="fixed inset-0 bg-gray-500/75 transition-opacity"
-      />
-
+      <DialogBackdrop className="fixed inset-0 bg-gray-500/75 transition-opacity" />
       <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
         <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-          <DialogPanel
-            className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-[90vw]"
-          >
+          <DialogPanel className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-[90vw]">
             {updateStatus && (
               <div className={`p-4 ${updateStatus.type === 'success' ? 'bg-green-100 text-green-800' :
-                updateStatus.type === 'error' ? 'bg-red-100 text-red-800' :
-                  'bg-blue-100 text-blue-800'
+                  updateStatus.type === 'error' ? 'bg-red-100 text-red-800' :
+                    'bg-blue-100 text-blue-800'
                 } border-l-4 ${updateStatus.type === 'success' ? 'border-green-500' :
                   updateStatus.type === 'error' ? 'border-red-500' :
                     'border-blue-500'
@@ -328,30 +344,29 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
                 {updateStatus.message}
               </div>
             )}
-
             <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4 overflow-y-auto">
               <div className="sm:flex sm:items-start">
-                <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 sm:mx-0 sm:h-10 sm:w-10">
-                  <ExclamationTriangleIcon className="h-6 w-6 text-amber-600" aria-hidden="true" />
-                </div>
                 <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
                   <DialogTitle as="h3" className="text-xl font-semibold text-gray-900">
-                    Update Progress for Order #{selectedOrder.order_number} - {teamType.toUpperCase()} Team
+                    <div className="bg-[#FF6701] p-4 rounded-t-md border-b border-orange-200 shadow-sm text-center">
+                      <h3 className="text-white text-xl font-bold flex tracking-wide gap-2">
+                        Update Progress for Order #{selectedOrder.order_number} - {teamType.toUpperCase()} Team
+                      </h3>
+                    </div>
                   </DialogTitle>
-                  <div className="mt-4">
-                    <div className="bg-amber-50 rounded-lg border border-amber-200 overflow-hidden">
+                  <div className="mt-10">
+                    <div className="rounded-lg overflow-hidden">
                       <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-amber-200 bg-amber-100/50">
-                            <th className="py-3 px-4 text-left font-medium text-[#8A2906]">Order</th>
-                            <th className="py-3 px-4 text-left font-medium text-[#8A2906]">Item</th>
-                            <th className="py-3 px-4 text-center font-medium text-[#8A2906]">Quantity</th>
-                            <th className="py-3 px-4 text-left font-medium text-[#8A2906]">Progress</th>
-                            <th className="py-3 px-4 text-center font-medium text-[#8A2906]">Today's Input</th>
-                            <th className="py-3 px-4 text-center font-medium text-[#8A2906]">Remaining</th>
+                        <thead className='bg-gradient-to-r from-[#993300] via-[#FF6600] to-[#FFB84D]'>
+                          <tr>
+                            <th className="py-4 px-4 text-left text-white font-semibold">Item</th>
+                            <th className="py-4 px-4 text-left text-white font-semibold">Quantity</th>
+                            <th className="py-4 px-4 text-left text-white font-semibold">Progress</th>
+                            <th className="py-4 px-4 text-left text-white font-semibold">Today's Input</th>
+                            <th className="py-4 px-4 text-left text-white font-semibold">Remaining</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-amber-200">
+                        <tbody className="divide-[#FFDFC8]">
                           {orderItems.map((item, index) => {
                             const prevCompleted = previouslyCompleted[item._id] || 0;
                             const todayCompleted = todaysQuantities[item._id] || 0;
@@ -361,42 +376,33 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
                             const newProgressPercent = getProgressPercentage(totalCompleted, item.quantity);
 
                             return (
-                              <tr key={item._id} className={index % 2 === 0 ? "bg-amber-50" : "bg-amber-100/20"}>
-                                {index === 0 && (
-                                  <td className="py-4 px-4" rowSpan={orderItems.length}>
-                                    <div className="font-medium text-lg">{selectedOrder.order_number}</div>
-                                    <div className="text-sm text-gray-600 mt-1">{selectedOrder.customer_name}</div>
-                                  </td>
-                                )}
-                                <td className="py-4 px-4">
-                                  <div className="bg-[#F05C1C] text-white px-3 py-2 rounded text-center font-medium">
+                              <tr key={item._id} className={index % 2 === 0 ?
+                                'bg-gradient-to-r from-[#FFFFFF] via-[#FFF5EC] to-[#FFEEE0]' :
+                                'bg-gradient-to-r from-[#FFF0E6] via-[#FFDAB3] to-[#FFE6CC]'}>
+                                <td className="py-5 px-4">
+                                  <div className="text-orange-600 rounded text-left font-medium">
                                     {getItemName(item, teamType)}
                                   </div>
                                 </td>
-                                <td className="py-4 px-4">
-                                  <div className="text-center font-medium text-lg">{item.quantity}</div>
+                                <td className="py-5 px-4">
+                                  <div className="text-left font-medium text-sm">{item.quantity}</div>
                                 </td>
-                                <td className="py-4 px-4 w-72">
-                                  {/* Progress header */}
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="text-sm font-medium">
-                                      {prevCompleted}/{item.quantity}
-                                    </div>
+                                <td className="py-5 px-4 w-72">
+                                  <div className="flex items-center mb-2">
                                     <div className="text-sm text-gray-600 font-medium">
                                       {progressPercent}% complete
                                     </div>
                                   </div>
-
-                                  <div className="relative w-full bg-gray-200 rounded-full h-8 overflow-hidden">
+                                  <div className="relative w-full bg-transparent rounded-full h-8 overflow-hidden border-2 border-gray-300">
                                     {prevCompleted > 0 && (
                                       <div
-                                        className="absolute top-0 left-0 h-full bg-green-600 transition-all"
+                                        className="absolute top-0 left-0 h-full bg-green-800 transition-all duration-500 ease-in-out"
                                         style={{ width: `${progressPercent}%` }}
                                       ></div>
                                     )}
                                     {todayCompleted > 0 && (
                                       <div
-                                        className="absolute top-0 h-full bg-orange-500 border-l border-white transition-all"
+                                        className="absolute top-0 h-full bg-orange-500 border-l border-white transition-all duration-500 ease-in-out"
                                         style={{
                                           left: `${progressPercent}%`,
                                           width: `${(todayCompleted / item.quantity) * 100}%`
@@ -404,7 +410,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
                                       ></div>
                                     )}
                                     <div className="absolute inset-0 flex items-center justify-center">
-                                      <span className="text-sm font-bold text-white drop-shadow-sm">
+                                      <span className="text-sm font-bold text-gray-800 drop-shadow-sm">
                                         {prevCompleted > 0 || todayCompleted > 0
                                           ? `${totalCompleted}/${item.quantity}`
                                           : '0%'
@@ -423,40 +429,27 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
                                     </div>
                                   )}
                                 </td>
-                                <td className="py-4 px-4">
-                                  <div className="flex flex-col space-y-2">
+                                <td className="py-5 px-4">
+                                  <div className="flex flex-col">
                                     <input
                                       type="number"
                                       min="0"
                                       max={item.quantity - prevCompleted}
-                                      className={`border rounded px-3 py-3 w-full text-center ${
-                                        errors[item._id] ? "border-red-500 bg-red-50" : "border-gray-300"
-                                      }`}
+                                      className={`border rounded px-3 py-3 w-full text-center ${errors[item._id] ? "border-red-500 bg-red-50" : "border-gray-300"
+                                        }`}
                                       value={todaysQuantities[item._id] || ''}
                                       onChange={(e) => handleCompletedChange(item._id, e.target.value)}
                                       placeholder="0"
                                     />
-                                    {errors[item._id] && (
-                                      <div className="text-xs text-red-600 font-medium">
-                                        {errors[item._id]}
-                                      </div>
-                                    )}
-                                    {!errors[item._id] && (
-                                      <div className="text-xs text-gray-500">
-                                        Max: {item.quantity - prevCompleted}
-                                      </div>
-                                    )}
+                                    <div className={`text-xs mt-1 ${errors[item._id] ? "text-red-600 font-medium" : "text-gray-500"}`}>
+                                      {errors[item._id] || `Max: ${item.quantity - prevCompleted}`}
+                                    </div>
                                   </div>
                                 </td>
-                                <td className="py-4 px-4 text-center">
-                                  <div className={`px-4 py-2 rounded-full inline-block font-medium ${remaining === 0
-                                    ? 'bg-green-100 text-green-800'
-                                    : 'bg-red-100 text-red-800'
+                                <td className="py-5 px-4">
+                                  <div className={`px-4 py-2 rounded-full inline-block font-medium ${remaining === 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                                     }`}>
-                                    {remaining === 0
-                                      ? 'Completed!'
-                                      : `${remaining} remaining`
-                                    }
+                                    {remaining === 0 ? 'Completed!' : `${remaining} remaining`}
                                   </div>
                                 </td>
                               </tr>
@@ -476,9 +469,8 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated }) =>
                       </button>
                       <button
                         type="button"
-                        className={`bg-[#A53107] text-white px-6 py-3 rounded hover:bg-[#8A2906] transition-colors font-medium shadow ${
-                          Object.keys(errors).length > 0 || isLoading ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className={`bg-[#A53107] text-white px-6 py-3 rounded hover:bg-[#8A2906] transition-colors font-medium shadow ${Object.keys(errors).length > 0 || isLoading ? 'opacity-60 cursor-not-allowed' : ''
+                          }`}
                         onClick={handleSaveChanges}
                         disabled={Object.keys(errors).length > 0 || isLoading}
                       >

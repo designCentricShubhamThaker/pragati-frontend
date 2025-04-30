@@ -119,12 +119,7 @@ function ViewDispatcherOrderDetails({ onClose, orders }) {
                     <h4 className="text-sm font-medium text-orange-800">Dispatcher</h4>
                     <p className="text-gray-900 font-semibold mt-1">{orders.dispatcher_name}</p>
                   </div>
-                  <div className="p-2">
-                    <h4 className="text-sm font-medium text-orange-800">Status</h4>
-                    <div className="mt-1">
-                      <StatusBadge value={orders.order_status} />
-                    </div>
-                  </div>
+                 
                 </div>
               </div>
 
@@ -151,9 +146,7 @@ function ViewDispatcherOrderDetails({ onClose, orders }) {
                               {field.label}
                             </th>
                           ))}
-                          <th scope="col" className="px-4 py-3 text-left text-sm font-semibold text-orange-900 uppercase tracking-wider">
-                            Status
-                          </th>
+                          
                         </tr>
                       </thead>
                       <tbody>
@@ -170,9 +163,7 @@ function ViewDispatcherOrderDetails({ onClose, orders }) {
                                 {field.getValue ? field.getValue(item) : (item[field.key] || '-')}
                               </td>
                             ))}
-                            <td className="px-4 py-3">
-                              <StatusBadge value={item.status} />
-                            </td>
+                            
                           </tr>
                         ))}
                       </tbody>

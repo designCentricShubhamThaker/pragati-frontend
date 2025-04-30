@@ -41,7 +41,7 @@ const ConnectionStatus = () => {
     } else if (connectedUsers?.teamMembers) {
       teamMembers = connectedUsers.teamMembers;
     }
-    // console.log([...teamMembers])
+
     return [...teamMembers];
   };
 

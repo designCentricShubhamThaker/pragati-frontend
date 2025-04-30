@@ -6,16 +6,27 @@ import { GiBottleCap } from "react-icons/gi";
 import { FaBox } from "react-icons/fa";
 import { FaPumpSoap } from "react-icons/fa";
 
-const OrderActivity = ({ onClose, orderData }) => {
+const OrderActivity = ({ onClose, orders }) => {
   const [selectedItem, setSelectedItem] = useState('all');
   const [expandedSections, setExpandedSections] = useState({});
 
   const formatTimestamp = (timestamp) => {
     try {
       if (!timestamp) return 'N/A';
-      const timeMs = typeof timestamp === 'object' && timestamp.$date && timestamp.$date.$numberLong
-        ? parseInt(timestamp.$date.$numberLong)
-        : new Date(timestamp).getTime();
+      
+      let timeMs;
+      
+      if (typeof timestamp === 'object' && timestamp.$date) {
+        if (timestamp.$date.$numberLong) {
+          timeMs = parseInt(timestamp.$date.$numberLong);
+        } else {
+          timeMs = new Date(timestamp.$date).getTime();
+        }
+      } else if (typeof timestamp === 'string') {
+        timeMs = new Date(timestamp).getTime();
+      } else {
+        timeMs = new Date(timestamp).getTime();
+      }
 
       if (isNaN(timeMs)) return 'N/A';
 
@@ -29,6 +40,7 @@ const OrderActivity = ({ onClose, orderData }) => {
         minute: '2-digit'
       })}`;
     } catch (error) {
+      console.error("Error formatting timestamp:", error);
       return 'N/A';
     }
   };
@@ -40,19 +52,25 @@ const OrderActivity = ({ onClose, orderData }) => {
     }));
   };
 
+
   const parseIntFromMongo = (value) => {
-    if (!value) return 0;
+    if (value === null || value === undefined) return 0;
     if (typeof value === 'number') return value;
-    if (typeof value === 'object' && value.$numberInt) {
-      return parseInt(value.$numberInt);
+    if (typeof value === 'string') {
+      const parsed = parseInt(value, 10);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    if (typeof value === 'object') {
+      if (value.$numberInt) return parseInt(value.$numberInt, 10);
+      if (value.$numberLong) return parseInt(value.$numberLong, 10);
     }
     return 0;
   };
 
   const getFilteredItems = () => {
-    const { order_details } = orderData;
+    const { order_details } = orders;
+    if (!order_details) return []; 
     let items = [];
-
     if (selectedItem === 'all' || selectedItem === 'glass') {
       items = [
         ...items,
@@ -72,7 +90,7 @@ const OrderActivity = ({ onClose, orderData }) => {
         ...(order_details.caps || []).map(item => ({
           ...item,
           type: 'caps',
-          display_name: `${item.cap_name} (${item.process}, ${item.material})`,
+          display_name: `${item.cap_name} (${item.process || ''}, ${item.material || 'Standard'})`,
           quantity: parseIntFromMongo(item.quantity),
           completed_qty: parseIntFromMongo(item.team_tracking?.total_completed_qty)
         }))
@@ -109,12 +127,16 @@ const OrderActivity = ({ onClose, orderData }) => {
   };
 
   const calculateProgress = (item) => {
-    if (!item.quantity || !item.completed_qty) return 0;
-    return Math.min(100, Math.floor((item.completed_qty / item.quantity) * 100));
+    const quantity = parseIntFromMongo(item.quantity);
+    const completedQty = parseIntFromMongo(item.completed_qty);
+    
+    if (!quantity || quantity === 0) return 0;
+    return Math.min(100, Math.floor((completedQty / quantity) * 100));
   };
 
   const parseCompletedEntry = (entry) => {
     if (!entry) return { qty: 0, time: null };
+    
     return {
       qty: parseIntFromMongo(entry.qty_completed),
       time: entry.timestamp
@@ -132,25 +154,27 @@ const OrderActivity = ({ onClose, orderData }) => {
       case 'pumps':
         return <FaPumpSoap size={20} />;
       default:
-        return <FaPumpSoap size={20} />;
+        return <Package size={20} />;
     }
   };
 
-  // Get status badge color
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'Completed':
         return 'text-green-900 bg-tranparent font-semibold px-3 py-1';
       case 'Pending':
-        return 'bg-transparent text-red-700 font-semibold px-3 py-1 ';
+        return 'bg-transparent text-red-700 font-semibold px-3 py-1';
       default:
-        return 'bg-orange-900 text-white font-semibold px-3 py-1';
+        return 'bg-transparent text-orange-700 font-semibold px-3 py-1';
     }
   };
 
   // Get summary cards based on filter
   const getSummaryCards = () => {
-    const { order_details } = orderData;
+    const { order_details } = orders;
+    if (!order_details) return [];
+    
     let itemTypes = [];
 
     if (selectedItem === 'all') {
@@ -162,7 +186,10 @@ const OrderActivity = ({ onClose, orderData }) => {
     return itemTypes.map(type => {
       const items = order_details[type] || [];
       const totalQuantity = items.reduce((sum, item) => sum + parseIntFromMongo(item.quantity), 0);
-      const completedQuantity = items.reduce((sum, item) => sum + parseIntFromMongo(item.team_tracking?.total_completed_qty || 0), 0);
+      const completedQuantity = items.reduce((sum, item) => {
+        return sum + parseIntFromMongo(item.team_tracking?.total_completed_qty || 0);
+      }, 0);
+      
       const progress = totalQuantity ? Math.floor((completedQuantity / totalQuantity) * 100) : 0;
 
       return (
@@ -175,7 +202,7 @@ const OrderActivity = ({ onClose, orderData }) => {
               {type === 'pumps' && <FaPumpSoap size={16} className="mr-1" />}
               {type}
             </span>
-            <span className="text-xs font-semibold px-3 py-1  rounded-full  text-gray-800">{items.length} items</span>
+            <span className="text-xs font-semibold px-3 py-1 rounded-full text-gray-800">{items.length} items</span>
           </div>
           <div className="flex items-center gap-2 mb-1">
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -196,6 +223,21 @@ const OrderActivity = ({ onClose, orderData }) => {
     });
   };
 
+  const getTimeValueInMs = (timestamp) => {
+    if (!timestamp) return 0;
+    
+    if (typeof timestamp === 'object') {
+      if (timestamp.$date) {
+        if (timestamp.$date.$numberLong) {
+          return parseInt(timestamp.$date.$numberLong);
+        }
+        return new Date(timestamp.$date).getTime();
+      }
+    }
+    
+    return new Date(timestamp).getTime();
+  };
+
   const filteredItems = getFilteredItems();
 
   return (
@@ -213,12 +255,12 @@ const OrderActivity = ({ onClose, orderData }) => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b pb-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-2xl font-bold text-gray-800">Order #{orderData.order_number}</h2>
-                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${orderData.order_status === 'Completed' ? 'bg-green-100 text-green-800' :
-                    orderData.order_status === 'Pending' ? 'bg-orange-100 text-orange-800' :
+                  <h2 className="text-2xl font-bold text-gray-800">Order #{orders.order_number}</h2>
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${orders.order_status === 'Completed' ? 'bg-green-100 text-green-800' :
+                    orders.order_status === 'Pending' ? 'bg-orange-100 text-orange-800' :
                       'bg-blue-100 text-blue-800'
                     }`}>
-                    {orderData.order_status}
+                    {orders.order_status}
                   </div>
                 </div>
               </div>
@@ -261,20 +303,14 @@ const OrderActivity = ({ onClose, orderData }) => {
                 const entries = item.team_tracking?.completed_entries || [];
                 const isCompleted = item.team_tracking?.status === 'Completed';
 
-                const processedEntries = entries.map(parseCompletedEntry)
+
+                const processedEntries = entries
+                  .map(parseCompletedEntry)
                   .filter(entry => entry.qty > 0)
                   .sort((a, b) => {
-
-                    const getTimeValue = (timestamp) => {
-                      if (!timestamp) return 0;
-                      if (typeof timestamp === 'object' && timestamp.$date && timestamp.$date.$numberLong) {
-                        return parseInt(timestamp.$date.$numberLong);
-                      }
-                      return new Date(timestamp).getTime();
-                    };
-
-                    return getTimeValue(a.time) - getTimeValue(b.time);
+                    return getTimeValueInMs(a.time) - getTimeValueInMs(b.time);
                   });
+
 
                 let cumulativeEntries = [];
                 let runningTotal = 0;
@@ -292,20 +328,13 @@ const OrderActivity = ({ onClose, orderData }) => {
                   });
                 });
 
+
                 let productionRate = null;
                 if (processedEntries.length >= 2) {
                   const latest = processedEntries[processedEntries.length - 1];
                   const previous = processedEntries[processedEntries.length - 2];
 
-                  const getTimeValue = (timestamp) => {
-                    if (!timestamp) return 0;
-                    if (typeof timestamp === 'object' && timestamp.$date && timestamp.$date.$numberLong) {
-                      return parseInt(timestamp.$date.$numberLong);
-                    }
-                    return new Date(timestamp).getTime();
-                  };
-
-                  const timeDiff = (getTimeValue(latest.time) - getTimeValue(previous.time)) / (1000 * 60 * 60); // hours
+                  const timeDiff = (getTimeValueInMs(latest.time) - getTimeValueInMs(previous.time)) / (1000 * 60 * 60); // hours
                   if (timeDiff > 0) {
                     productionRate = Math.round(latest.qty / timeDiff);
                   }
@@ -335,7 +364,7 @@ const OrderActivity = ({ onClose, orderData }) => {
                           <h3 className="font-semibold text-orange-600">{item.display_name}</h3>
                           <div className="mt-2">
                             <span className="inline-block w-full text-red-700 text-sm font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
-                              Total Quantity : {item.quantity.toLocaleString()}
+                              Total Quantity: {item.quantity.toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -403,16 +432,12 @@ const OrderActivity = ({ onClose, orderData }) => {
                             </span>
                           </div>
                         </div>
+
                         {processedEntries.length > 0 && (
                           <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
                             <h4 className="text-md font-semibold text-black mb-1">Production Info</h4>
                             <div className="flex items-center gap-4">
-                              {productionRate && (
-                                <div>
-                                  <div className="text-sm font-semibold text-[#9c3900]">Production Rate</div>
-                                  <div className="text-lg font-semibold text-[#6A7283]">{productionRate} units/hr</div>
-                                </div>
-                              )}
+                              
                               <div>
                                 <div className="text-sm font-semibold text-[#9c3900]">Completed</div>
                                 <div className="text-lg font-semibold text-[#6A7283]">
@@ -455,7 +480,6 @@ const OrderActivity = ({ onClose, orderData }) => {
                                       <span className="text-sm text-[#9F0F12] flex items-center font-medium">
                                         <CalendarDays size={16} className="mr-2 text-[#9F0F12]" />
                                         {formatTimestamp(entry.time)}
-
                                       </span>
                                       <span className={`px-3 py-1 text-sm font-semibold rounded-full inline-flex items-center ${statusBadgeColor}`}>
                                         {isComplete && <Check size={12} className="mr-1 text-[#639E3C]" />}
@@ -507,12 +531,8 @@ const OrderActivity = ({ onClose, orderData }) => {
                                     {hasMoreEntries && (
                                       <div className="mt-3 text-right text-sm font-medium text-red-800">
                                         Time to next entry: {(() => {
-                                          const current = new Date(typeof entry.time === 'object' && entry.time.$date ?
-                                            parseInt(entry.time.$date.$numberLong) : entry.time).getTime();
-                                          const next = new Date(typeof cumulativeEntries[entryIndex + 1].time === 'object' &&
-                                            cumulativeEntries[entryIndex + 1].time.$date ?
-                                            parseInt(cumulativeEntries[entryIndex + 1].time.$date.$numberLong) :
-                                            cumulativeEntries[entryIndex + 1].time).getTime();
+                                          const current = getTimeValueInMs(entry.time);
+                                          const next = getTimeValueInMs(cumulativeEntries[entryIndex + 1].time);
 
                                           const diffMs = next - current;
                                           const diffMins = Math.floor(Math.abs(diffMs) / (1000 * 60));
@@ -595,5 +615,3 @@ const OrderActivity = ({ onClose, orderData }) => {
 }
 
 export default OrderActivity;
-
-

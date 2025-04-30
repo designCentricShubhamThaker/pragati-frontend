@@ -89,129 +89,16 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
     });
   };
 
-  // const handleSubmit = async (e) => {
-  //   e.preventDefault();
-  //   setIsSubmitting(true);
-  //   setError('');
-
-  //   // Basic validation for order metadata
-  //   if (!orderNumber || !dispatcherName || !customerName) {
-  //     setError('Please fill in all required fields: order number, dispatcher name, and customer name');
-  //     setIsSubmitting(false);
-  //     return;
-  //   }
-
-
-  //   const validGlassItems = orderDetails.items.filter(item =>
-  //     item.glass_name !== "N/A" && item.glass_name !== "" && item.quantity);
-
-  //   const validCapItems = orderDetails.caps.filter(cap =>
-  //     cap.cap_name !== "N/A" && cap.cap_name !== "" && cap.quantity);
-
-  //   const validBoxItems = orderDetails.boxes.filter(box =>
-  //     box.box_name !== "N/A" && box.box_name !== "" && box.quantity);
-
-  //   const validPumpItems = orderDetails.pumps.filter(pump =>
-  //     pump.pump_name !== "N/A" && pump.pump_name !== "" && pump.quantity);
-
-  //   const hasValidItems = validGlassItems.length > 0 || validCapItems.length > 0 ||
-  //     validBoxItems.length > 0 || validPumpItems.length > 0;
-
-  //   if (!hasValidItems) {
-  //     setError('Please add at least one valid item with name and quantity to the order');
-  //     setIsSubmitting(false);
-  //     return;
-  //   }
-
-  //   // Only include categories that have valid items
-  //   const mappedOrderDetails = {};
-
-  //   if (validGlassItems.length > 0) {
-  //     mappedOrderDetails.glass = validGlassItems.map(item => ({
-  //       glass_name: item.glass_name,
-  //       quantity: parseInt(item.quantity, 10) || 0,
-  //       weight: item.weight || '',
-  //       neck_size: item.neck_size || '',
-  //       decoration: item.decoration || '',
-  //       decoration_no: item.decoration_no || '',
-  //       decoration_details: {
-  //         type: item.decoration || '',
-  //         decoration_number: item.decoration_no || ''
-  //       },
-  //       team: item.team || '',
-  //       status: item.status || 'Pending'
-  //     }));
-  //   }
-
-  //   if (validCapItems.length > 0) {
-  //     mappedOrderDetails.caps = validCapItems.map(cap => ({
-  //       cap_name: cap.cap_name,
-  //       neck_size: cap.neck_size || '',
-  //       quantity: parseInt(cap.quantity, 10) || 0,
-  //       process: cap.cap_process || '',
-  //       material: cap.cap_material || '',
-  //       team: cap.team || '',
-  //       status: cap.status || 'Pending'
-  //     }));
-  //   }
-
-  //   if (validBoxItems.length > 0) {
-  //     mappedOrderDetails.boxes = validBoxItems.map(box => ({
-  //       box_name: box.box_name,
-  //       quantity: parseInt(box.quantity, 10) || 0,
-  //       approval_code: box.approval_code || '',
-  //       team: box.team || '',
-  //       status: box.status || 'Pending'
-  //     }));
-  //   }
-
-  //   if (validPumpItems.length > 0) {
-  //     mappedOrderDetails.pumps = validPumpItems.map(pump => ({
-  //       pump_name: pump.pump_name,
-  //       neck_type: pump.neck_type || '',
-  //       quantity: parseInt(pump.quantity, 10) || 0,
-  //       team: pump.team || '',
-  //       status: pump.status || 'Pending'
-  //     }));
-  //   }
-
-  //   const newOrder = {
-  //     order_number: orderNumber.trim(),
-  //     dispatcher_name: dispatcherName.trim(),
-  //     customer_name: customerName.trim(),
-  //     order_status: 'Pending',
-  //     order_details: mappedOrderDetails
-  //   };
-
-  //   try {
-  //     const response = await axios.post("http://localhost:5000/orders", newOrder);
-  //     if (onCreateOrder) {
-  //       await onCreateOrder(response.data);
-  //     }
-
-      
-  //     resetForm();
-  //     onClose();
-  //   } catch (error) {
-  //     setError('Error creating order: ' + (error.response?.data?.message || error.message));
-  //     setIsSubmitting(false);
-  //   }
-  // };
-  
-  
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError('');
 
-    // Basic validation for order metadata
     if (!orderNumber || !dispatcherName || !customerName) {
       setError('Please fill in all required fields: order number, dispatcher name, and customer name');
       setIsSubmitting(false);
       return;
     }
-
-
     const validGlassItems = orderDetails.items.filter(item =>
       item.glass_name !== "N/A" && item.glass_name !== "" && item.quantity);
 
@@ -233,7 +120,6 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
       return;
     }
 
-    // Only include categories that have valid items
     const mappedOrderDetails = {};
 
     if (validGlassItems.length > 0) {
@@ -294,23 +180,19 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
     };
 
     try {
-      // First save the order to the database
       const response = await axios.post("http://localhost:5000/orders", newOrder);
       const createdOrder = response.data.order;
-      
-      // Then notify relevant teams via socket
+
       if (isConnected && notifyOrderCreation) {
         console.log("🔔 Notifying teams about new order via socket");
         notifyOrderCreation(createdOrder);
       } else {
         console.warn("⚠️ Socket not connected, teams won't be notified in real-time");
       }
-      
-      // Call the parent component's callback if provided
+
       if (onCreateOrder) {
         await onCreateOrder(createdOrder);
       }
-      
       resetForm();
       onClose();
     } catch (error) {
@@ -464,25 +346,23 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                       </div>
                     </div>
 
-                    <div className="mb-8 rounded-xl shadow-lg overflow-hidden border border-orange-200">
-
+                    <div className="mb-8 rounded-xl shadow-lg overflow-visible border border-orange-200 relative">
                       <div className="bg-gradient-to-r from-[#993300] via-[#FF6600] to-[#FFB84D] p-4">
                         <h3 className="text-lg font-semibold text-white flex items-center">
                           <span className="mr-2">Team - Glass</span>
                         </h3>
                       </div>
 
-
                       <div className="p-6 bg-[#FFF8F3] space-y-6">
                         {orderDetails.items.map((item, index) => (
                           <div
                             key={`item-${index}`}
-                            className="relative bg-white rounded-lg shadow-sm p-5 border border-orange-100"
+                            className="relative  bg-white rounded-lg shadow-sm p-5 border border-orange-100 overflow-visible "
                           >
                             <div className="grid grid-cols-12 gap-4">
                               {/* Glass Name */}
-                              <div className="col-span-12 md:col-span-4">
-                                <label className="block text-sm font-medium text-orange-800 mb-2">Glass Name</label>
+                              <div className="col-span-12 md:col-span-4 ">
+                                <label className="block text-sm font-medium text-orange-800 mb-2 ">Glass Name</label>
                                 <div className="relative">
                                   <input
                                     type="text"
@@ -497,14 +377,14 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                       setGlassSearches(newSearches);
                                       const searchTerm = e.target.value.toLowerCase();
                                       const filtered = glassData.filter(glass =>
-                                        (glass.FORMULA !== "N/A" || searchTerm === "n/a") &&
+                                        (glass.FORMULA !== "N/A" || searchTerm === "n/a" ) &&
                                         glass.FORMULA.toLowerCase().includes(searchTerm)
                                       );
                                       setFilteredGlassData(filtered);
                                     }}
                                     className="w-full px-4 py-3 border border-orange-300 rounded-md text-sm 
-                           focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors
-                           placeholder:text-gray-400"
+                  focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors
+                  placeholder:text-gray-400 z-50"
                                   />
                                   <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -517,37 +397,36 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                   </svg>
 
                                   {/* Dropdown */}
-                                  <div className="relative">
-                                    {isDropdownVisible === index && (
-                                      <div className="absolute z-999 w-full mt-1 min-w-[400px] bg-white shadow-xl max-h-60 rounded-md py-1 text-sm overflow-auto border border-orange-200">
-                                        {filteredGlassData.length > 0 ? (
-                                          filteredGlassData.map((glass, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="cursor-pointer px-4 py-3 hover:bg-orange-50 transition-colors flex items-center"
-                                              onClick={() => {
-                                                const newSearches = { ...glassSearches, [index]: glass.FORMULA === "N/A" ? "" : glass.FORMULA };
-                                                setGlassSearches(newSearches);
-                                                handleDetailChange('items', index, 'glass_name', glass.FORMULA);
-                                                handleDetailChange('items', index, 'neck_size', glass.NECK_DIAM);
-                                                handleDetailChange('items', index, 'weight', glass.ML);
-                                                setIsDropdownVisible(false);
-                                              }}
-                                            >
-                                              <span className="text-orange-700 font-medium">
-                                                {glass.FORMULA === "N/A" ? "Please Select" : glass.FORMULA}
-                                              </span>
-                                            </div>
-                                          ))
-                                        ) : (
-                                          <div className="px-4 py-3 text-gray-500 italic">No results found</div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
+                                  {isDropdownVisible === index && (
+                                    <div className="absolute z-50 w-full mt-1 min-w-[400px] bg-white shadow-xl max-h-60 rounded-md py-1 text-sm overflow-auto border border-orange-200">
+                                      {filteredGlassData.length > 0 ? (
+                                        filteredGlassData.map((glass, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="cursor-pointer px-4 py-3 hover:bg-orange-50 transition-colors flex items-center"
+                                            onClick={() => {
+                                              const newSearches = { ...glassSearches, [index]: glass.FORMULA === "N/A" ? "" : glass.FORMULA };
+                                              setGlassSearches(newSearches);
+                                              handleDetailChange('items', index, 'glass_name', glass.FORMULA);
+                                              handleDetailChange('items', index, 'neck_size', glass.NECK_DIAM);
+                                              handleDetailChange('items', index, 'weight', glass.ML);
+                                              setIsDropdownVisible(false);
+                                            }}
+                                          >
+                                            <span className="text-orange-700 font-medium">
+                                              {glass.FORMULA === "N/A" ? "Please Select" : glass.FORMULA}
+                                            </span>
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <div className="px-4 py-3 text-gray-500 italic">No results found</div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
+                              {/* Right Column Inputs */}
                               <div className="col-span-12 md:col-span-8">
                                 <div className="grid grid-cols-12 gap-4">
                                   {/* Weight */}
@@ -582,7 +461,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                         value={item.decoration}
                                         onChange={(e) => handleDetailChange('items', index, 'decoration', e.target.value)}
                                         className="w-full appearance-none px-4 py-3 border border-orange-300 rounded-md text-sm 
-                              focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
+                      focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
                                       >
                                         <option value="N/A">Please Select</option>
                                         {decorationOptions
@@ -593,7 +472,6 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                             </option>
                                           ))}
                                       </select>
-
                                       <svg
                                         xmlns="http://www.w3.org/2000/svg"
                                         className="h-5 w-5 absolute right-3 top-3 text-orange-500 pointer-events-none"
@@ -614,7 +492,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                       value={item.decoration_no}
                                       onChange={(e) => handleDetailChange('items', index, 'decoration_no', e.target.value)}
                                       className="w-full px-4 py-3 border border-orange-300 rounded-md text-sm 
-                            focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                     />
                                   </div>
 
@@ -627,7 +505,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                         value={item.quantity}
                                         onChange={(e) => handleDetailChange('items', index, 'quantity', e.target.value)}
                                         className="w-full px-4 py-3 border border-orange-300 rounded-md text-sm 
-                              focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                       />
                                     </div>
                                   </div>
@@ -635,6 +513,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                               </div>
                             </div>
 
+                            {/* Add/Remove Buttons */}
                             <div className="absolute -top-3 right-3 flex items-center space-x-2">
                               <button
                                 type="button"
@@ -648,7 +527,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                                 type="button"
                                 onClick={() => removeItem("items", index)}
                                 className={`text-white p-1.5 rounded-full transition-colors shadow-sm
-                      ${orderDetails.items.length === 1
+              ${orderDetails.items.length === 1
                                     ? 'bg-gray-400 cursor-not-allowed'
                                     : 'bg-orange-500 hover:bg-orange-600 cursor-pointer'
                                   }`}
@@ -662,6 +541,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
                         ))}
                       </div>
                     </div>
+
 
                     <div className="mb-8 rounded-xl shadow-lg overflow-hidden border border-orange-200">
                       <div className="bg-gradient-to-r from-[#993300] via-[#FF6600] to-[#FFB84D] p-4">

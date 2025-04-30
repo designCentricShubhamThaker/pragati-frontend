@@ -3,12 +3,14 @@ import { useTable, useGlobalFilter, useSortBy, usePagination } from 'react-table
 import { Eye, Plus, Check } from 'lucide-react';
 import { FiEdit } from "react-icons/fi";
 import { toast } from 'react-hot-toast';
+import { AiOutlineSmallDash } from "react-icons/ai";
 import { TbTimelineEvent } from "react-icons/tb";
 import axios from 'axios';
 import CreateOrder from '../child-components/CreateOrder';
 import OrderActivity from '../child-components/OrderActivity';
 import ViewDispatcherOrderDetails from '../child-components/ViewDispatcherOrderDetails.jsx';
 import { useAuth } from '../context/auth';
+
 import {
   setupLocalStorageSync,
   updateLocalStorageOrders,
@@ -20,6 +22,8 @@ import { FaDownload } from 'react-icons/fa';
 import { MdDeleteOutline } from "react-icons/md";
 import EditDispatcherOrder from '../child-components/EditDispatcherOrder.jsx';
 import DeleteOrder from '../child-components/DeleteOrder.jsx';
+import ExcelDownloadComponent from '../utils/DownloadExcelUtils.jsx';
+
 
 function customGlobalFilter(rows, columnIds, filterValue) {
 
@@ -50,24 +54,30 @@ const Table = () => {
   const { user } = useAuth();
 
   useEffect(() => {
+    const handleWheel = (e) => {
+      const active = document.activeElement;
+      if (active && active.type === 'number') {
+        active.blur();
+      }
+    };
+    window.addEventListener('wheel', handleWheel);
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!socket) return;
 
     const handleOrderDeleted = ({ orderId }) => {
       if (!orderId) return;
-
       console.log(`🔁 Order deleted across tabs: ${orderId}`);
-
-      // Remove from localStorage
       deleteOrderFromLocalStorage(orderId);
-
-      // Remove from UI
       setOrders(prev =>
         prev.filter(o => o.orderDetails?.order_number !== orderId)
       );
     };
-
     socket.on("orderDeleted", handleOrderDeleted);
-
     return () => {
       socket.off("orderDeleted", handleOrderDeleted);
     };
@@ -107,15 +117,23 @@ const Table = () => {
 
   const handleSaveData = () => {
     console.log('data updatedd')
+    toast.success("Order Edited successfully!");
   }
 
   useEffect(() => {
     if (!socket || !isConnected) return;
 
-    const handleOrderUpdate = (updatedOrder) => {
-      console.log('📦 Received order update via socket:', updatedOrder);
-      const updatedOrders = updateLocalStorageOrders(user, [updatedOrder]);
-      setOrders(updatedOrders);
+    const handleOrderUpdate = (data) => {
+      console.log('📦 Received order update via socket:', data);
+
+      const updatedOrder = data.order || null;
+
+      if (updatedOrder && updatedOrder._id) {
+        const updatedOrders = updateLocalStorageOrders(user, [updatedOrder]);
+        setOrders(updatedOrders);
+      } else {
+        console.error('Received malformed order update:', data);
+      }
     };
 
     socket.on('order-updated', handleOrderUpdate);
@@ -125,9 +143,10 @@ const Table = () => {
     };
   }, [socket, isConnected, user]);
 
-  const handleCreateOrder = async (newOrderData) => {
+ 
+  const handleCreateOrder = async (neworders) => {
     try {
-      const orderToAdd = newOrderData.order ? newOrderData.order : newOrderData;
+      const orderToAdd = neworders.order ? neworders.order : neworders;
 
       const updatedOrders = updateLocalStorageOrders(user, [orderToAdd]);
       setOrders(updatedOrders);
@@ -152,8 +171,8 @@ const Table = () => {
   };
 
   const getTeamStatus = (items, teamType) => {
-    if (!items || !Array.isArray(items) || items.length === 0) return "Pending";
-
+    if (!items || !Array.isArray(items) || items.length === 0) return "NotIncluded";
+  
     return items.every(item =>
       item.status === "Done" ||
       (item.team_tracking?.total_completed_qty >= item.quantity)
@@ -204,14 +223,21 @@ const Table = () => {
 
   const calculateCompletionPercentage = (row) => {
     const teamsToCheck = ['glass', 'cap', 'box', 'pump', 'decoration'];
-    const doneCount = teamsToCheck.filter(team => row[team] === 'Done').length;
-    return (doneCount / teamsToCheck.length) * 100;
+    const includedTeams = teamsToCheck.filter(team => row[team] !== 'NotIncluded');
+    
+    // If no teams are included, return 0%
+    if (includedTeams.length === 0) return 0;
+    
+    const doneCount = includedTeams.filter(team => row[team] === 'Done').length;
+    return (doneCount / includedTeams.length) * 100;
   };
-
+  
   const StatusBadge = ({ value }) => (
     <div className="flex justify-center">
       {value === "Done" ? (
         <Check size={18} strokeWidth={3} className="text-[#FF6900] font-bold" />
+      ) : value === "NotIncluded" ? (
+        <AiOutlineSmallDash size={18} strokeWidth={3} className="text-[#FF6900] font-bold"/>
       ) : (
         <img src="./download.svg" alt="" className='w-5 filter drop-shadow-md' />
       )}
@@ -240,16 +266,13 @@ const Table = () => {
 
   const handleDeleteSuccess = (orderNumber) => {
     setOrders(prevOrders => prevOrders.filter(order => order.order_number !== orderNumber))
-    // Refresh your table data or state here
-    // Example: refetchOrders();
   };
 
   const handleDeleteError = (error) => {
     console.error('Delete operation failed:', error);
-    // Handle error state if needed
+
   };
 
-  ;
   const columns = useMemo(
     () => [
       {
@@ -478,10 +501,7 @@ const Table = () => {
               ></path>
             </svg>
           </div>
-          <button className="flex items-center cursor-pointer justify-center gap-1 bg-[#6B7499] hover:bg-gray-500 text-white py-2 px-4 rounded-sm shadow-md transition-colors duration-200">
-            <FaDownload size={18} />
-
-          </button>
+          <ExcelDownloadComponent orders={orders} />
         </div>
       </div>
 
@@ -695,10 +715,10 @@ const Table = () => {
 
       {showModal && <ViewDispatcherOrderDetails orders={selectedOrder} onClose={handleClose} />}
       {createOrder && <CreateOrder onClose={handleClose} onCreateOrder={handleCreateOrder} />}
-      {showTimeline && <OrderActivity onClose={handleClose} orderData={selectedOrder} />}
-      {editOrder && <EditDispatcherOrder onClose={handleClose} onSave={handleSaveData} user={user} orderData={selectedOrder} />}
-      {handleOpenDeleteModal && <DeleteOrder onClose={handleClose} isOpen={handleOpenDeleteModal}onSuccess={handleDeleteSuccess}
-        onError={handleDeleteError} user={user}orderNumber={selectedOrder.order_number} />}
+      {showTimeline && <OrderActivity onClose={handleClose} orders={selectedOrder} />}
+      {editOrder && <EditDispatcherOrder onClose={handleClose} onSave={handleSaveData} user={user} orders={selectedOrder} />}
+      {handleOpenDeleteModal && <DeleteOrder onClose={handleClose} isOpen={handleOpenDeleteModal} onSuccess={handleDeleteSuccess}
+        onError={handleDeleteError} user={user} orderNumber={selectedOrder.order_number} />}
     </div>
   );
 };

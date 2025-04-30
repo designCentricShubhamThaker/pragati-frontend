@@ -306,17 +306,20 @@ const OrdersList = ({ orderType }) => {
           lastUpdatedTimestamp: new Date().toISOString()
         } : order
       );
-
+  
       saveOrdersToLocalStorage(user, updatedOrders);
-      
-      const event = new CustomEvent('localStorageUpdated', {
-        detail: {
-          key: generateLocalStorageKey(user),
-          orders: updatedOrders
-        }
-      });
-      window.dispatchEvent(event);
-
+  
+      // ✅ DEFER the event dispatch to the next microtask
+      setTimeout(() => {
+        const event = new CustomEvent('localStorageUpdated', {
+          detail: {
+            key: generateLocalStorageKey(user),
+            orders: updatedOrders
+          }
+        });
+        window.dispatchEvent(event);
+      }, 0);
+  
       return updatedOrders;
     });
   }, [user]);
@@ -609,42 +612,40 @@ const OrdersList = ({ orderType }) => {
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
-        <button className="mt-2 sm:mt-0 cursor-pointer bg-orange-700 text-white  flex items-center gap-2 px-3 py-1.5 rounded-sm shadow-md transition-colors duration-200 font-medium  hover:bg-red-900 hover:text-white">
-          <Plus size={16} />
-        </button>
+     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+  {/* Left-aligned search input */}
+  <div className="relative w-full md:max-w-sm">
+    <input
+      type="text"
+      placeholder="Search..."
+      value={filterInput}
+      onChange={handleFilterChange}
+      className="w-full px-3 py-1.5 pr-10 border border-[#c57138] rounded-md focus:outline-none focus:ring-2 focus:ring-[#FF6900] focus:border-[#FF6900] font-inter text-gray-700"
+    />
+    <svg
+      className="w-5 h-5 absolute right-3 top-1.5 text-[#FF6900]"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      ></path>
+    </svg>
+  </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search..."
-              value={filterInput}
-              className="px-3 py-1.5 pr-10 border border-[#c57138] rounded-md focus:outline-none focus:ring-2 focus:ring-[#FF6900] focus:border-[#FF6900] font-inter text-gray-700"
-              onChange={handleFilterChange}
-            />
-            <svg
-              className="w-5 h-5 absolute right-3 top-1.5 text-[#FF6900]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              ></path>
-            </svg>
-          </div>
+  {/* Right-aligned download button */}
+  <div className="flex justify-end">
+    <button className="flex items-center cursor-pointer justify-center gap-1 bg-[#6B7499] hover:bg-gray-500 text-white py-2 px-4 rounded-sm shadow-md transition-colors duration-200">
+      <FaDownload size={18} />
+    </button>
+  </div>
+</div>
 
-          <button className="flex items-center cursor-pointer justify-center gap-1 bg-[#6B7499] hover:bg-gray-500 text-white py-2 px-4 rounded-sm shadow-md transition-colors duration-200">
-            <FaDownload size={18} />
-
-          </button>
-        </div>
-      </div>
 
       {page.length === 0 ? (
         <div className="flex justify-center items-center h-64 bg-[#FFF5EC] rounded-md border border-[#FFD7BC]">
@@ -891,6 +892,7 @@ const OrdersList = ({ orderType }) => {
         onClose={handleClose}
         selectedOrder={selectedOrder}
         onOrderUpdated={handleOrderUpdated}
+        teamType={teamType}
       />}
     </div>
 
