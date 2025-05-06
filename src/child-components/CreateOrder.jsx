@@ -93,35 +93,36 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError('');
-
+  
     if (!orderNumber || !dispatcherName || !customerName) {
       setError('Please fill in all required fields: order number, dispatcher name, and customer name');
       setIsSubmitting(false);
       return;
     }
+    
     const validGlassItems = orderDetails.items.filter(item =>
       item.glass_name !== "N/A" && item.glass_name !== "" && item.quantity);
-
+  
     const validCapItems = orderDetails.caps.filter(cap =>
       cap.cap_name !== "N/A" && cap.cap_name !== "" && cap.quantity);
-
+  
     const validBoxItems = orderDetails.boxes.filter(box =>
       box.box_name !== "N/A" && box.box_name !== "" && box.quantity);
-
+  
     const validPumpItems = orderDetails.pumps.filter(pump =>
       pump.pump_name !== "N/A" && pump.pump_name !== "" && pump.quantity);
-
+  
     const hasValidItems = validGlassItems.length > 0 || validCapItems.length > 0 ||
       validBoxItems.length > 0 || validPumpItems.length > 0;
-
+  
     if (!hasValidItems) {
       setError('Please add at least one valid item with name and quantity to the order');
       setIsSubmitting(false);
       return;
     }
-
+  
     const mappedOrderDetails = {};
-
+  
     if (validGlassItems.length > 0) {
       mappedOrderDetails.glass = validGlassItems.map(item => ({
         glass_name: item.glass_name,
@@ -138,7 +139,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
         status: item.status || 'Pending'
       }));
     }
-
+  
     if (validCapItems.length > 0) {
       mappedOrderDetails.caps = validCapItems.map(cap => ({
         cap_name: cap.cap_name,
@@ -150,7 +151,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
         status: cap.status || 'Pending'
       }));
     }
-
+  
     if (validBoxItems.length > 0) {
       mappedOrderDetails.boxes = validBoxItems.map(box => ({
         box_name: box.box_name,
@@ -160,7 +161,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
         status: box.status || 'Pending'
       }));
     }
-
+  
     if (validPumpItems.length > 0) {
       mappedOrderDetails.pumps = validPumpItems.map(pump => ({
         pump_name: pump.pump_name,
@@ -170,7 +171,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
         status: pump.status || 'Pending'
       }));
     }
-
+  
     const newOrder = {
       order_number: orderNumber.trim(),
       dispatcher_name: dispatcherName.trim(),
@@ -178,20 +179,17 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
       order_status: 'Pending',
       order_details: mappedOrderDetails
     };
-
+  
     try {
       const response = await axios.post("http://localhost:5000/orders", newOrder);
       const createdOrder = response.data.order;
-
+      
+      if (onCreateOrder) {
+        await onCreateOrder(createdOrder);
+      }
       if (isConnected && notifyOrderCreation) {
         console.log("🔔 Notifying teams about new order via socket");
         notifyOrderCreation(createdOrder);
-      } else {
-        console.warn("⚠️ Socket not connected, teams won't be notified in real-time");
-      }
-
-      if (onCreateOrder) {
-        await onCreateOrder(createdOrder);
       }
       resetForm();
       onClose();

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTable, useGlobalFilter, useSortBy, usePagination } from 'react-table';
 import { Eye, Plus, Check } from 'lucide-react';
 import { FiEdit } from "react-icons/fi";
@@ -10,15 +10,14 @@ import CreateOrder from '../child-components/CreateOrder';
 import OrderActivity from '../child-components/OrderActivity';
 import ViewDispatcherOrderDetails from '../child-components/ViewDispatcherOrderDetails.jsx';
 import { useAuth } from '../context/auth';
-
 import {
-  setupLocalStorageSync,
   updateLocalStorageOrders,
   getOrdersFromLocalStorage,
-
+  saveOrdersToLocalStorage,
+  syncOrdersBasedOnStatus,
+  deleteOrderFromLocalStorage,
 } from '../utils/LocalStorageUtils.jsx';
 import { useSocket } from '../context/SocketContext.jsx';
-import { FaDownload } from 'react-icons/fa';
 import { MdDeleteOutline } from "react-icons/md";
 import EditDispatcherOrder from '../child-components/EditDispatcherOrder.jsx';
 import DeleteOrder from '../child-components/DeleteOrder.jsx';
@@ -40,7 +39,7 @@ function customGlobalFilter(rows, columnIds, filterValue) {
   });
 }
 
-const Table = () => {
+const Table = ({ orderType }) => {
   const [showModal, setShowModal] = useState(false);
   const [createOrder, setCreateOrder] = useState(false);
   const [editOrder, setEditOrder] = useState(false)
@@ -52,6 +51,7 @@ const Table = () => {
   const [handleOpenDeleteModal, setHandleOpenDeleteModal] = useState(false)
   const { socket, isConnected } = useSocket();
   const { user } = useAuth();
+  const ordersRef = useRef([]);
 
   useEffect(() => {
     const handleWheel = (e) => {
@@ -67,8 +67,13 @@ const Table = () => {
   }, []);
 
   useEffect(() => {
-    if (!socket) return;
+    if (orders.length > 0) {
+      saveOrdersToLocalStorage(user, orders);
+    }
+  }, [orders, user, orderType]);
 
+  useEffect(() => {
+    if (!socket) return;
     const handleOrderDeleted = ({ orderId }) => {
       if (!orderId) return;
       console.log(`🔁 Order deleted across tabs: ${orderId}`);
@@ -84,29 +89,34 @@ const Table = () => {
   }, [socket]);
 
   useEffect(() => {
-    const storedOrders = getOrdersFromLocalStorage(user);
+    console.log(`Order type changed to: ${orderType}, checking localStorage first`);
+    const storedOrders = getOrdersFromLocalStorage(user, orderType);
     if (storedOrders.length > 0) {
+      console.log(`Found ${storedOrders.length} orders in localStorage for ${orderType}`);
       setOrders(storedOrders);
       setIsLoading(false);
     } else {
+      console.log(`No orders found in localStorage for ${orderType}, fetching from API`);
       fetchOrders();
     }
-  }, [user]);
-
-  useEffect(() => {
-    const cleanup = setupLocalStorageSync(user, (updatedOrders) => {
-      setOrders(updatedOrders);
-    });
-
-    return cleanup;
-  }, [user]);
+  }, [user, orderType]);
 
   const fetchOrders = async () => {
     try {
       setIsLoading(true);
-      const response = await axios.get('http://localhost:5000/orders');
+      console.log(`Fetching orders for type: ${orderType}, user role: ${user?.role}`);
+      const response = await axios.get(`http://localhost:5000/orders/${orderType}`, {
+        params: {
+          role: user?.role,
+          team: user?.team
+        }
+      });
 
-      const updatedOrders = updateLocalStorageOrders(user, response.data || []);
+      console.log(`Received ${response.data?.length || 0} orders from API`);
+
+      // Save fetched orders to state and localStorage
+      const updatedOrders = response.data || [];
+      saveOrdersToLocalStorage(user, updatedOrders, orderType);
       setOrders(updatedOrders);
     } catch (error) {
       console.error('Error fetching orders:', error);
@@ -125,36 +135,150 @@ const Table = () => {
 
     const handleOrderUpdate = (data) => {
       console.log('📦 Received order update via socket:', data);
-
       const updatedOrder = data.order || null;
 
-      if (updatedOrder && updatedOrder._id) {
-        const updatedOrders = updateLocalStorageOrders(user, [updatedOrder]);
-        setOrders(updatedOrders);
-      } else {
+      if (!updatedOrder || !updatedOrder._id) {
         console.error('Received malformed order update:', data);
+        return;
       }
+      syncOrdersBasedOnStatus(user, updatedOrder);
+
+      let belongsInCurrentView = false;
+
+      if (user.role === 'admin' || user.role === 'dispatcher') {
+        const isCompleted = updatedOrder.order_status?.toLowerCase() === 'completed';
+        belongsInCurrentView = (
+          (orderType === 'liveOrders' && !isCompleted) ||
+          (orderType === 'pastOrders' && isCompleted)
+        );
+      } else {
+        const teamType = determineTeamType(user.team);
+        if (teamType && updatedOrder.order_details && updatedOrder.order_details[teamType]) {
+          const teamItems = updatedOrder.order_details[teamType];
+          const allItemsComplete = teamItems.every(item =>
+            item.team_tracking?.status === 'Completed' ||
+            (item.team_tracking?.total_completed_qty >= item.quantity)
+          );
+          belongsInCurrentView = (orderType === 'pastOrders' && allItemsComplete) ||
+            (orderType === 'liveOrders' && !allItemsComplete);
+        }
+      }
+      setOrders(prevOrders => {
+        if (!belongsInCurrentView) {
+          return prevOrders.filter(order =>
+            order._id !== updatedOrder._id &&
+            order.order_number !== updatedOrder.order_number
+          );
+        }
+        const existingOrderIndex = prevOrders.findIndex(order =>
+          order._id === updatedOrder._id ||
+          order.order_number === updatedOrder.order_number
+        );
+
+        if (existingOrderIndex >= 0) {
+          console.log('🔄 Updating existing order:', updatedOrder.order_number);
+          const newOrders = [...prevOrders];
+          newOrders[existingOrderIndex] = updatedOrder;
+          return newOrders;
+        } else if (belongsInCurrentView) {
+          console.log('➕ Adding new order to view:', updatedOrder.order_number);
+          return [...prevOrders, updatedOrder];
+        }
+        return prevOrders;
+      });
     };
-
     socket.on('order-updated', handleOrderUpdate);
-
     return () => {
       socket.off('order-updated', handleOrderUpdate);
     };
-  }, [socket, isConnected, user]);
+  }, [socket, isConnected, orderType, user]);
 
- 
-  const handleCreateOrder = async (neworders) => {
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    const handleOrderCreated = (data) => {
+      const newOrder = data.order;
+      if (!newOrder || !newOrder._id) return;
+
+      console.log('📥 New order received via socket:', newOrder.order_number);
+
+      // Determine if this order belongs in current view
+      let belongsInCurrentView = false;
+
+      if (user.role === 'admin' || user.role === 'dispatcher') {
+        const isCompleted = newOrder.order_status?.toLowerCase() === 'completed';
+        belongsInCurrentView = (
+          (orderType === 'liveOrders' && !isCompleted) ||
+          (orderType === 'pastOrders' && isCompleted)
+        );
+      } else {
+        // For team users, check if all team items are complete
+        const teamType = determineTeamType(user.team);
+        if (teamType && newOrder.order_details && newOrder.order_details[teamType]) {
+          const teamItems = newOrder.order_details[teamType];
+          const allItemsComplete = teamItems.every(item =>
+            item.team_tracking?.status === 'Completed' ||
+            (item.team_tracking?.total_completed_qty >= item.quantity)
+          );
+          belongsInCurrentView = (orderType === 'pastOrders' && allItemsComplete) ||
+            (orderType === 'liveOrders' && !allItemsComplete);
+        }
+      }
+
+      if (!belongsInCurrentView) {
+        console.log(`Order ${newOrder.order_number} does not belong in ${orderType} view`);
+        return;
+      }
+      setOrders(prevOrders => {
+
+        const exists = prevOrders.some(
+          order => order._id === newOrder._id || order.order_number === newOrder.order_number
+        );
+        if (exists) return prevOrders;
+
+        // Add to current view
+        console.log(`Adding order ${newOrder.order_number} to ${orderType} view`);
+        const updated = [...prevOrders, newOrder];
+        saveOrdersToLocalStorage(user, updated, orderType);
+        return updated;
+      });
+    };
+
+    socket.on('order-created', handleOrderCreated);
+    return () => socket.off('order-created', handleOrderCreated);
+  }, [socket, isConnected, user, orderType]);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  const handleCreateOrder = async (newOrder) => {
     try {
-      const orderToAdd = neworders.order ? neworders.order : neworders;
-
-      const updatedOrders = updateLocalStorageOrders(user, [orderToAdd]);
-      setOrders(updatedOrders);
+      const orderToAdd = newOrder.order || newOrder;
+      if (!orderToAdd || !orderToAdd._id) {
+        console.warn("🚫 Skipping invalid order (missing _id):", orderToAdd);
+        return;
+      }
+      const isDuplicate = orders.some(
+        existingOrder =>
+          existingOrder._id === orderToAdd._id ||
+          (existingOrder.order_number === orderToAdd.order_number && orderToAdd.order_number)
+      );
+      if (isDuplicate) {
+        console.warn("⚠️ Order already exists in local state:", orderToAdd.order_number);
+        return;
+      }
+      setOrders(prevOrders => {
+        const updatedOrders = [...prevOrders, orderToAdd];
+        saveOrdersToLocalStorage(user, updatedOrders);
+        return updatedOrders;
+      });
       toast.success("Order created successfully!");
     } catch (error) {
-      console.error('Error creating order:', error);
+      console.error("Error handling order creation:", error);
+      toast.error("Failed to create order");
     }
-  };
+  }
 
   const handleClose = () => {
     setShowModal(false);
@@ -172,7 +296,6 @@ const Table = () => {
 
   const getTeamStatus = (items, teamType) => {
     if (!items || !Array.isArray(items) || items.length === 0) return "NotIncluded";
-  
     return items.every(item =>
       item.status === "Done" ||
       (item.team_tracking?.total_completed_qty >= item.quantity)
@@ -182,28 +305,16 @@ const Table = () => {
   const transformedData = useMemo(() => {
     return orders.map(order => {
       const orderDetails = order.order_details || {};
-
       const glassStatus = orderDetails.glass ?
         getTeamStatus(orderDetails.glass) : "Pending";
-
       const capStatus = orderDetails.caps ?
         getTeamStatus(orderDetails.caps) : "Pending";
-
       const boxStatus = orderDetails.boxes ?
         getTeamStatus(orderDetails.boxes) : "Pending";
-
       const pumpStatus = orderDetails.pumps ?
         getTeamStatus(orderDetails.pumps) : "Pending";
-
-      const decorationStatus = orderDetails.glass &&
-        orderDetails.glass.length > 0 &&
-        orderDetails.glass.every(glass =>
-          glass.decoration_details?.type &&
-          glass.decoration_details?.decoration_number &&
-          glass.status === "Done"
-        )
-        ? "Done"
-        : "Pending";
+      const hasGlass = orderDetails.glass && orderDetails.glass.length > 0;
+      const decorationStatus = hasGlass ? "Pending" : "NotIncluded";
 
       return {
         orderNo: order.order_number,
@@ -224,20 +335,18 @@ const Table = () => {
   const calculateCompletionPercentage = (row) => {
     const teamsToCheck = ['glass', 'cap', 'box', 'pump', 'decoration'];
     const includedTeams = teamsToCheck.filter(team => row[team] !== 'NotIncluded');
-    
-    // If no teams are included, return 0%
+
     if (includedTeams.length === 0) return 0;
-    
     const doneCount = includedTeams.filter(team => row[team] === 'Done').length;
     return (doneCount / includedTeams.length) * 100;
   };
-  
+
   const StatusBadge = ({ value }) => (
     <div className="flex justify-center">
       {value === "Done" ? (
         <Check size={18} strokeWidth={3} className="text-[#FF6900] font-bold" />
       ) : value === "NotIncluded" ? (
-        <AiOutlineSmallDash size={18} strokeWidth={3} className="text-[#FF6900] font-bold"/>
+        <AiOutlineSmallDash size={18} strokeWidth={3} className="text-[#FF6900] font-bold" />
       ) : (
         <img src="./download.svg" alt="" className='w-5 filter drop-shadow-md' />
       )}

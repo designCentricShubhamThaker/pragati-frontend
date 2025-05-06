@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect,useCallback } from 'react';
 import { ChevronLeft, X, Menu } from 'lucide-react';
 import Table from './pages/Table';
 import { useAuth } from './context/auth';
@@ -9,19 +9,94 @@ import { FaPowerOff } from "react-icons/fa";
 import { Toaster } from 'react-hot-toast';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useSocket } from './context/SocketContext';
 
 const DispatcherDashboard = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('liveOrders');
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { logout } = useAuth()
+  const [statusCounts, setStatusCounts] = useState({
+    pendingOrdersCount: 0,
+    completedOrderCount: 0
+  });
+  const { logout } = useAuth();
+  const { socket, isConnected } = useSocket();
 
   const handleLogout = () => {
     logout();
-
     window.location.href = '/login';
   };
+
+  /////////////////////
+  // Improved updateStatusCounts function
+  const updateStatusCounts = useCallback(() => {
+    try {
+      const liveOrders = JSON.parse(localStorage.getItem("dispatcher_liveOrders") || '[]');
+      const pastOrders = JSON.parse(localStorage.getItem("dispatcher_pastOrders") || '[]');
+      
+      setStatusCounts({
+        pendingOrdersCount: liveOrders.length,
+        completedOrderCount: pastOrders.length
+      });
+    } catch (error) {
+      console.error("Error updating status counts:", error);
+    }
+  }, []);
+  
+  // Initial load of status counts
+  useEffect(() => {
+    updateStatusCounts();
+    // Set up interval to periodically check for changes
+    const intervalId = setInterval(updateStatusCounts, 3000);
+    return () => clearInterval(intervalId);
+  }, [updateStatusCounts]);
+
+  // Socket event listeners for real-time updates
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleOrderChange = () => {
+      setTimeout(updateStatusCounts, 100); // Add slight delay to ensure localStorage is updated
+    };
+    
+    socket.on('order-created', handleOrderChange);
+    socket.on('order-updated', handleOrderChange);
+    socket.on('orderDeleted', handleOrderChange);
+    
+    return () => {
+      socket.off('order-created', handleOrderChange);
+      socket.off('order-updated', handleOrderChange);
+      socket.off('orderDeleted', handleOrderChange);
+    };
+  }, [socket, isConnected, updateStatusCounts]);
+
+  // Listen for custom events from Table component
+  useEffect(() => {
+    const handleLocalUpdate = () => {
+      setTimeout(updateStatusCounts, 100); // Add slight delay to ensure localStorage is updated first
+    };
+    
+    window.addEventListener('orderDataChanged', handleLocalUpdate);
+    
+    return () => {
+      window.removeEventListener('orderDataChanged', handleLocalUpdate);
+    };
+  }, [updateStatusCounts]);
+
+  // Add event listener for storage changes
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key && (e.key === "dispatcher_liveOrders" || e.key === "dispatcher_pastOrders")) {
+        updateStatusCounts();
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [updateStatusCounts]);
+  ////////////////////////////////
+  
 
   useEffect(() => {
     const handleResize = () => {
@@ -48,35 +123,6 @@ const DispatcherDashboard = () => {
     { id: 'liveOrders', label: 'LIVE ORDERS' },
     { id: 'pastOrders', label: 'PAST ORDERS' },
   ];
-
-  const getStatusCount = () => {
-    const data = localStorage.getItem("dispatcher_all_orders");
-    let allOrders = [];
-
-    if (data) {
-      try {
-        allOrders = JSON.parse(data);
-        if (!Array.isArray(allOrders)) {
-          allOrders = [];
-        }
-      } catch (error) {
-        allOrders = [];
-      }
-    }
-
-    let pendingOrdersCount = 0;
-    let completedOrderCount = 0;
-
-    allOrders.forEach((e) => {
-      if (e.order_status === "Pending") {
-        pendingOrdersCount += 1;
-      } else {
-        completedOrderCount += 1;
-      }
-    });
-
-    return { pendingOrdersCount, completedOrderCount };
-  };
 
   const MobileSidebar = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-40 flex md:hidden">
@@ -114,8 +160,8 @@ const DispatcherDashboard = () => {
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
-        <Toaster position="top-center" reverseOrder={false} className="mt-6" />
-        <ToastContainer />
+      <Toaster position="top-center" reverseOrder={false} className="mt-6" />
+      <ToastContainer />
       {!isMobile && (
         <div
           className={`bg-[url('./bg2.jpg')] bg-cover bg-center text-white flex flex-col transition-all duration-300 
@@ -155,7 +201,7 @@ const DispatcherDashboard = () => {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white shadow-sm p-4 flex items-center justify-between">
-       
+
           <div className="flex items-center">
             {isMobile || collapsed ? (
               <button onClick={toggleSidebar} className="p-2 mr-2 rounded-lg hover:bg-gray-100">
@@ -177,7 +223,7 @@ const DispatcherDashboard = () => {
                       <LuCalendarClock size={18} />
                     </div>
                     <div className="flex items-center">
-                      <span className="text-2xl font-bold text-orange-500 mr-2">{getStatusCount().pendingOrdersCount}</span>
+                    <span className="text-2xl font-bold text-orange-500 mr-2">{statusCounts.pendingOrdersCount}</span>
                       <div className="flex flex-col">
                         <span className="text-gray-700 text-sm font-medium">Pending Orders</span>
                         <span className="text-xs text-gray-500">orders awaiting processing</span>
@@ -193,7 +239,7 @@ const DispatcherDashboard = () => {
                       <FaCheck size={16} />
                     </div>
                     <div className="flex items-center">
-                      <span className="text-2xl font-bold text-green-600 mr-2">{getStatusCount().completedOrderCount}</span>
+                    <span className="text-2xl font-bold text-green-600 mr-2">{statusCounts.completedOrderCount}</span>
                       <div className="flex flex-col">
                         <span className="text-gray-700 text-sm font-medium">Completed Orders</span>
                         <span className="text-xs text-gray-500">orders successfully fulfilled</span>
@@ -207,21 +253,19 @@ const DispatcherDashboard = () => {
           </div>
 
           <div className="flex items-center space-x-4">
-          <ConnectionStatus />
+            <ConnectionStatus />
             <div className="flex items-center bg-red-700 text-white rounded-sm px-4 py-3 gap-2 hover:bg-red-800 hover:text-white shadow-md">
               <button onClick={handleLogout} className="font-medium cursor-pointer"><FaPowerOff /></button>
             </div>
-          
+
           </div>
         </header>
         <main className="flex-1 p-4 overflow-hidden">
           <div className="bg-white rounded-lg shadow-md p-6 h-full flex flex-col">
             {activeTab === 'liveOrders' ? (
-              <Table />
+              <Table orderType="liveOrders" />
             ) : (
-              <div className="text-center text-gray-500 py-8 flex-1">
-                Past Orders Content Will Appear Here
-              </div>
+              <Table orderType="pastOrders"  />
             )}
           </div>
         </main>

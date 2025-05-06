@@ -21,6 +21,8 @@ import {
   saveOrdersToLocalStorage,
   setupLocalStorageSync,
   updateLocalStorageOrders,
+  moveOrderBetweenStorages,
+  deleteOrderFromAllStorages,
 
 } from '../utils/LocalStorageUtils';
 import { FaDownload } from 'react-icons/fa';
@@ -46,10 +48,8 @@ const OrdersList = ({ orderType }) => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [newOrderAlert, setNewOrderAlert] = useState(null);
-
   const { user } = useAuth();
-  const { socket, isConnected } = useSocket();
-
+  const { socket } = useSocket();
   const teamType = useMemo(() => determineTeamType(user.team), [user.team]);
   const teamColumns = useMemo(() => getTeamTypeSpecificColumns(teamType), [teamType]);
 
@@ -58,13 +58,13 @@ const OrdersList = ({ orderType }) => {
   };
 
   useEffect(() => {
-    const storedOrders = getOrdersFromLocalStorage(user);
+    const storedOrders = getOrdersFromLocalStorage(user, orderType);
     if (storedOrders.length > 0) {
       setOrders(storedOrders);
       setLoading(false);
+    } else {
+      fetchOrders();
     }
-
-    fetchOrders();
   }, [orderType, user]);
 
   useEffect(() => {
@@ -73,7 +73,7 @@ const OrdersList = ({ orderType }) => {
     });
 
     return cleanup;
-  }, [user]);
+  }, [user, orderType]);
 
 
   const isOrderRelevantForTeam = useCallback((order, teamType) => {
@@ -108,7 +108,7 @@ const OrdersList = ({ orderType }) => {
         params: { team: user.team }
       });
 
-      const updatedOrders = updateLocalStorageOrders(user, response.data.orders);
+      const updatedOrders = updateLocalStorageOrders(user, response.data.orders, orderType);
       setOrders(updatedOrders);
     } catch (error) {
       console.error("Error fetching orders:", error);
@@ -118,112 +118,136 @@ const OrdersList = ({ orderType }) => {
   }, [orderType, user]);
 
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
-
-  useEffect(() => {
     if (!socket) return;
 
-    // Handle new order from socket
     const handleSocketNewOrder = (data) => {
       console.log(`🔌 Socket received new order: Order #${data.order?.order_number}`);
-      
+
       if (isOrderRelevantForTeam(data.order)) {
         setOrders(prevOrders => {
-          // Check if order already exists
           const exists = prevOrders.some(o => o._id === data.order._id);
           if (exists) return prevOrders;
-          
-          // Add new order and save to localStorage
           const newOrders = [...prevOrders, data.order];
           saveOrdersToLocalStorage(user, newOrders);
-          
-          // Show notification
+
           setNewOrderAlert({
             id: data.order._id,
             number: data.order.order_number,
             timestamp: new Date().toISOString()
           });
-          
-          // Clear notification after 5 seconds
+
           setTimeout(() => setNewOrderAlert(null), 5000);
-          
+
           return newOrders;
         });
       }
     };
 
-    // Handle order update from socket
     const handleSocketOrderUpdated = (data) => {
       console.log(`🔌 Socket received updated order: Order #${data.order?.order_number}`);
-      
-      setOrders(prevOrders => {
-        const updatedOrders = prevOrders.map(prevOrder =>
-          prevOrder._id === data.order._id 
-            ? { ...data.order, lastUpdatedTimestamp: new Date().toISOString() } 
-            : prevOrder
-        );
-        
-        saveOrdersToLocalStorage(user, updatedOrders);
-        return updatedOrders;
-      });
+
+      if (!isOrderRelevantForTeam(data.order, teamType)) return;
+
+      const teamItems = data.order.order_details[teamType] || [];
+      const allItemsComplete = teamItems.every(item =>
+        item.team_tracking?.status === 'Completed' ||
+        (item.team_tracking?.total_completed_qty >= item.quantity)
+      );
+      if (orderType === 'liveOrders' && allItemsComplete) {
+        setOrders(prevOrders => {
+          const filteredOrders = prevOrders.filter(order => order._id !== data.order._id);
+          saveOrdersToLocalStorage(user, filteredOrders, orderType);
+          moveOrderBetweenStorages(user, data.order, 'liveOrders', 'pastOrders');
+
+          return filteredOrders;
+        });
+      }
+
+      else if (orderType === 'pastOrders' && !allItemsComplete) {
+        setOrders(prevOrders => {
+          const filteredOrders = prevOrders.filter(order => order._id !== data.order._id);
+          saveOrdersToLocalStorage(user, filteredOrders, orderType);
+          moveOrderBetweenStorages(user, data.order, 'pastOrders', 'liveOrders');
+
+          return filteredOrders;
+        });
+      }
+      else if ((orderType === 'liveOrders' && !allItemsComplete) ||
+        (orderType === 'pastOrders' && allItemsComplete)) {
+        setOrders(prevOrders => {
+          const updatedOrders = prevOrders.map(prevOrder =>
+            prevOrder._id === data.order._id
+              ? { ...data.order, lastUpdatedTimestamp: new Date().toISOString() }
+              : prevOrder
+          );
+
+          saveOrdersToLocalStorage(user, updatedOrders, orderType);
+          return updatedOrders;
+        });
+      }
     };
 
-    // Handle order edit from socket
     const handleSocketOrderEdited = (order) => {
       console.log(`🔌 Socket received edited order: Order #${order?.order_number}`);
-      
-      if (!isOrderRelevantForTeam(order ,teamType)) return;
-      
+
+      if (!isOrderRelevantForTeam(order, teamType)) return;
+
       setOrders(prevOrders => {
-        const updatedOrders = prevOrders.map(prevOrder =>
-          prevOrder._id === order._id 
-            ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } 
-            : prevOrder
-        );
-        
-        saveOrdersToLocalStorage(user, updatedOrders);
+        const exists = prevOrders.some(o => o._id === order._id);
+        let updatedOrders;
+
+        if (exists) {
+          updatedOrders = prevOrders.map(prevOrder =>
+            prevOrder._id === order._id
+              ? { ...order, lastUpdatedTimestamp: new Date().toISOString() }
+              : prevOrder
+          );
+        } else {
+          updatedOrders = [...prevOrders, { ...order, lastUpdatedTimestamp: new Date().toISOString() }];
+        }
+
+        saveOrdersToLocalStorage(user, updatedOrders, orderType);
         return updatedOrders;
       });
     };
 
-    // Handle order deletion from socket
     const handleSocketOrderDeleted = (data) => {
       console.log(`🔌 Socket received deleted order: Order #${data.order?.order_number}`);
-      
+
+      // Use the new utility function to delete from all storages
+      deleteOrderFromAllStorages(user, data.order);
+
+      // Update the UI state to reflect the deletion
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.filter(order => order._id !== data.order._id);
-        saveOrdersToLocalStorage(user, updatedOrders);
         return updatedOrders;
       });
     };
 
-    // Register socket event listeners
     socket.on('new-order', handleSocketNewOrder);
     socket.on('order-updated', handleSocketOrderUpdated);
     socket.on('order-edited', handleSocketOrderEdited);
     socket.on('order-deleted', handleSocketOrderDeleted);
 
-    // Clean up socket event listeners
     return () => {
       socket.off('new-order', handleSocketNewOrder);
       socket.off('order-updated', handleSocketOrderUpdated);
       socket.off('order-edited', handleSocketOrderEdited);
       socket.off('order-deleted', handleSocketOrderDeleted);
     };
-  }, [socket, user, isOrderRelevantForTeam ,teamType]);
+  }, [socket, user, isOrderRelevantForTeam, teamType]);
 
   useEffect(() => {
 
     const handleNewOrder = (event) => {
       const { order } = event.detail;
-      
-      if (isOrderRelevantForTeam(order ,teamType)) {
+
+      if (isOrderRelevantForTeam(order, teamType)) {
         setOrders(prevOrders => {
 
           const exists = prevOrders.some(o => o._id === order._id);
           if (exists) return prevOrders;
-          
+
           const newOrders = [...prevOrders, order];
           saveOrdersToLocalStorage(user, newOrders);
           setNewOrderAlert({
@@ -231,9 +255,9 @@ const OrdersList = ({ orderType }) => {
             number: order.order_number,
             timestamp: new Date().toISOString()
           });
-          
+
           setTimeout(() => setNewOrderAlert(null), 5000);
-          
+
           return newOrders;
         });
       }
@@ -241,12 +265,12 @@ const OrdersList = ({ orderType }) => {
 
     const handleOrderUpdate = (event) => {
       const { order } = event.detail;
-      
+
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.map(prevOrder =>
           prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
         );
-        
+
         saveOrdersToLocalStorage(user, updatedOrders);
         return updatedOrders;
       });
@@ -254,15 +278,13 @@ const OrdersList = ({ orderType }) => {
 
     const handleOrderEdited = (event) => {
       const { order } = event.detail;
-      if (!isOrderRelevantForTeam(order ,teamType)) return;
-      
+      if (!isOrderRelevantForTeam(order, teamType)) return;
+
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.map(prevOrder =>
           prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
         );
-        
         saveOrdersToLocalStorage(user, updatedOrders);
-        
         const syncEvent = new CustomEvent('localStorageUpdated', {
           detail: {
             key: generateLocalStorageKey(user),
@@ -270,20 +292,18 @@ const OrdersList = ({ orderType }) => {
           }
         });
         window.dispatchEvent(syncEvent);
-        
         return updatedOrders;
       });
     };
 
     const handleOrderDeleted = (event) => {
       const { order } = event.detail;
-      
+      deleteOrderFromAllStorages(user, order);
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.filter(prevOrder => prevOrder._id !== order._id);
-        saveOrdersToLocalStorage(user, updatedOrders);
         return updatedOrders;
       });
-    };
+    }
 
     window.addEventListener('orderCreated', handleNewOrder);
     window.addEventListener('orderUpdated', handleOrderUpdate);
@@ -296,39 +316,66 @@ const OrdersList = ({ orderType }) => {
       window.removeEventListener('orderEdited', handleOrderEdited);
       window.removeEventListener('orderDeleted', handleOrderDeleted);
     };
-  }, [user, isOrderRelevantForTeam ,teamType]);
+  }, [user, isOrderRelevantForTeam, teamType]);
 
   const handleOrderUpdated = useCallback((updatedOrder) => {
-    setOrders(prevOrders => {
-      const updatedOrders = prevOrders.map(order =>
-        order._id === updatedOrder._id ? {
-          ...updatedOrder,
-          lastUpdatedTimestamp: new Date().toISOString()
-        } : order
-      );
-  
-      saveOrdersToLocalStorage(user, updatedOrders);
-  
-      // ✅ DEFER the event dispatch to the next microtask
-      setTimeout(() => {
-        const event = new CustomEvent('localStorageUpdated', {
-          detail: {
-            key: generateLocalStorageKey(user),
-            orders: updatedOrders
-          }
-        });
-        window.dispatchEvent(event);
-      }, 0);
-  
-      return updatedOrders;
-    });
-  }, [user]);
+    const teamType = determineTeamType(user.team);
+
+    // Skip if we can't determine team type
+    if (!teamType || !updatedOrder.order_details || !updatedOrder.order_details[teamType]) {
+      console.warn('Unable to update order: missing team type or team details');
+      return;
+    }
+
+    // Check if all items for this team are completed
+    const teamItems = updatedOrder.order_details[teamType];
+    const allItemsComplete = teamItems.every(item =>
+      item.team_tracking?.status === 'Completed' ||
+      (item.team_tracking?.total_completed_qty >= item.quantity)
+    );
+
+    // Current list is liveOrders and team completed all items - move to past orders
+    if (orderType === 'liveOrders' && allItemsComplete) {
+      setOrders(prevOrders => {
+        const filteredOrders = prevOrders.filter(order => order._id !== updatedOrder._id);
+        saveOrdersToLocalStorage(user, filteredOrders, orderType);
+
+        // Move to past orders
+        moveOrderBetweenStorages(user, updatedOrder, 'liveOrders', 'pastOrders');
+
+        return filteredOrders;
+      });
+    }
+    // Current list is pastOrders and team has incomplete items - move to live orders
+    else if (orderType === 'pastOrders' && !allItemsComplete) {
+      setOrders(prevOrders => {
+        const filteredOrders = prevOrders.filter(order => order._id !== updatedOrder._id);
+        saveOrdersToLocalStorage(user, filteredOrders, orderType);
+        moveOrderBetweenStorages(user, updatedOrder, 'pastOrders', 'liveOrders');
+
+        return filteredOrders;
+      });
+    }
+
+    else {
+      setOrders(prevOrders => {
+        const updatedOrders = prevOrders.map(order =>
+          order._id === updatedOrder._id ? {
+            ...updatedOrder,
+            lastUpdatedTimestamp: new Date().toISOString()
+          } : order
+        );
+
+        saveOrdersToLocalStorage(user, updatedOrders, orderType);
+        return updatedOrders;
+      });
+    }
+  }, [user, orderType]);
 
   const handleEditOrder = useCallback((order) => {
     setSelectedOrder(order);
     setShowModal(true);
   }, []);
-
 
   const formatItemDate = (dateString) => {
     if (!dateString) return 'Not updated';
@@ -612,39 +659,39 @@ const OrdersList = ({ orderType }) => {
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-  {/* Left-aligned search input */}
-  <div className="relative w-full md:max-w-sm">
-    <input
-      type="text"
-      placeholder="Search..."
-      value={filterInput}
-      onChange={handleFilterChange}
-      className="w-full px-3 py-1.5 pr-10 border border-[#c57138] rounded-md focus:outline-none focus:ring-2 focus:ring-[#FF6900] focus:border-[#FF6900] font-inter text-gray-700"
-    />
-    <svg
-      className="w-5 h-5 absolute right-3 top-1.5 text-[#FF6900]"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-      ></path>
-    </svg>
-  </div>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        {/* Left-aligned search input */}
+        <div className="relative w-full md:max-w-sm">
+          <input
+            type="text"
+            placeholder="Search..."
+            value={filterInput}
+            onChange={handleFilterChange}
+            className="w-full px-3 py-1.5 pr-10 border border-[#c57138] rounded-md focus:outline-none focus:ring-2 focus:ring-[#FF6900] focus:border-[#FF6900] font-inter text-gray-700"
+          />
+          <svg
+            className="w-5 h-5 absolute right-3 top-1.5 text-[#FF6900]"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            ></path>
+          </svg>
+        </div>
 
-  {/* Right-aligned download button */}
-  <div className="flex justify-end">
-    <button className="flex items-center cursor-pointer justify-center gap-1 bg-[#6B7499] hover:bg-gray-500 text-white py-2 px-4 rounded-sm shadow-md transition-colors duration-200">
-      <FaDownload size={18} />
-    </button>
-  </div>
-</div>
+        {/* Right-aligned download button */}
+        <div className="flex justify-end">
+          <button className="flex items-center cursor-pointer justify-center gap-1 bg-[#6B7499] hover:bg-gray-500 text-white py-2 px-4 rounded-sm shadow-md transition-colors duration-200">
+            <FaDownload size={18} />
+          </button>
+        </div>
+      </div>
 
 
       {page.length === 0 ? (
@@ -898,6 +945,4 @@ const OrdersList = ({ orderType }) => {
 
   )
 }
-
-
 export default OrdersList;

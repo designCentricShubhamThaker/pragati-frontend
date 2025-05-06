@@ -86,6 +86,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
   }, [user, selectedOrder, teamType]);
 
 
+
   const handleSaveChanges = useCallback(async () => {
     if (!order) {
       setUpdateStatus({
@@ -94,13 +95,13 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
       });
       return;
     }
-
+  
     console.log("Starting to save order changes...");
-
+  
     const hasValidUpdates = orderItems.some(
       item => (todaysQuantities[item._id] || 0) > 0
     );
-
+  
     if (!hasValidUpdates) {
       setUpdateStatus({
         type: "error",
@@ -108,7 +109,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
       });
       return;
     }
-
+  
     if (Object.keys(errors).length > 0) {
       setUpdateStatus({
         type: "error",
@@ -116,13 +117,13 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
       });
       return;
     }
-
+  
     setIsLoading(true);
     setUpdateStatus(null);
-
+  
     try {
       console.log("Preparing update payload...");
-
+  
       const updatePayload = {
         order_number: order.order_number,
         team_type: teamType,
@@ -134,99 +135,58 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
             [teamType + '_name']: item[teamType + '_name']
           }))
       };
-
       console.log("Update payload:", updatePayload);
-
+  
       const response = await axios.patch(
         "http://localhost:5000/orders/update-progress",
         updatePayload
       );
-
+  
       console.log("Order progress successfully updated on backend:", response.data);
-
-      const updatedOrder = {
-        ...order,
-        team_tracking: {
-          ...order.team_tracking,
-          [`${teamType}_total_completed_qty`]: Object.entries(previouslyCompleted || {}).reduce(
-            (total, [itemId, prevQty]) => {
-              const todayQty = todaysQuantities[itemId] || 0;
-              return total + prevQty + todayQty;
-            },
-            0
-          )
-        },
-        order_details: {
-          ...order.order_details,
-          [teamType]: order.order_details[teamType].map(item => {
-            const todayQty = todaysQuantities[item._id] || 0;
-
-            if (todayQty <= 0) return item;
-
-            return {
-              ...item,
-              team_tracking: {
-                ...item.team_tracking,
-                total_completed_qty: (item.team_tracking?.total_completed_qty || 0) + todayQty,
-
-                completed_entries: [
-                  ...(item.team_tracking?.completed_entries || []),
-                  {
-                    qty_completed: todayQty,
-                    timestamp: new Date().toISOString()
-                  }
-                ],
-                status: calculateItemStatus(item, todayQty)
-              }
-            };
-          })
-        }
-      };
-
-      console.log("Updated order before saving to localStorage:", updatedOrder);
-
-      const updateLog = createOrderUpdateLog(order, teamType, updatePayload.updates);
-
+  
+      const updatedOrder = response.data.order;
+  
+      console.log("Updated order from backend:", updatedOrder);
+  
       if (updatedOrder && updatedOrder.order_number) {
         console.log("Sending order update via socket:", updatedOrder);
-        notifyOrderUpdate({
-          ...updatedOrder,
-        });
+        notifyOrderUpdate(updatedOrder);
       } else {
         console.error("Invalid order update, not sending via socket:", updatedOrder);
       }
-
-      const localUpdatedOrders = updateLocalStorageOrders(user, [updatedOrder], teamType, updateLog);
+  
+      const localUpdatedOrders = updateLocalStorageOrders(user, [updatedOrder]);
       console.log("Order progress updated in localStorage:", localUpdatedOrders);
+      
       window.dispatchEvent(new CustomEvent('localStorageUpdated', {
         detail: { key: generateLocalStorageKey(user), orders: localUpdatedOrders }
       }));
-
+  
       if (onOrderUpdated) {
         const updatedOrderInStorage = localUpdatedOrders.find(o => o._id === order._id);
         onOrderUpdated(updatedOrderInStorage);
       }
-
+  
       setUpdateStatus({
         type: "success",
         message: "Order progress updated successfully!"
       });
-
+  
       setTodaysQuantities({});
       setCompletedQuantities({});
       setErrors({});
-
+  
       setTimeout(() => {
         onClose();
       }, 1500);
-
+  
     } catch (error) {
       console.error("Update error:", error);
       setUpdateStatus({
         type: "error",
         message: error.response?.data?.error || "Failed to update order progress. Please try again."
       });
-
+  
     } finally {
       setIsLoading(false);
     }
@@ -238,7 +198,6 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
     onOrderUpdated,
     onClose,
     user,
-    previouslyCompleted,
     orderItems,
     notifyOrderUpdate
   ]);
