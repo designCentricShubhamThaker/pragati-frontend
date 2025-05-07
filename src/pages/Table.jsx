@@ -26,7 +26,6 @@ import ExcelDownloadComponent from '../utils/DownloadExcelUtils.jsx';
 
 function customGlobalFilter(rows, columnIds, filterValue) {
 
-
   if (filterValue === "") return rows;
   const filterLower = String(filterValue).toLowerCase();
   return rows.filter(row => {
@@ -66,12 +65,7 @@ const Table = ({ orderType }) => {
     };
   }, []);
 
-  useEffect(() => {
-    if (orders.length > 0) {
-      saveOrdersToLocalStorage(user, orders);
-    }
-  }, [orders, user, orderType]);
-
+  
   useEffect(() => {
     if (!socket) return;
     const handleOrderDeleted = ({ orderId }) => {
@@ -136,15 +130,17 @@ const Table = ({ orderType }) => {
     const handleOrderUpdate = (data) => {
       console.log('📦 Received order update via socket:', data);
       const updatedOrder = data.order || null;
-
+    
       if (!updatedOrder || !updatedOrder._id) {
         console.error('Received malformed order update:', data);
         return;
       }
+      
+      // Use this central function to sync localStorage
       syncOrdersBasedOnStatus(user, updatedOrder);
-
+    
       let belongsInCurrentView = false;
-
+    
       if (user.role === 'admin' || user.role === 'dispatcher') {
         const isCompleted = updatedOrder.order_status?.toLowerCase() === 'completed';
         belongsInCurrentView = (
@@ -163,6 +159,7 @@ const Table = ({ orderType }) => {
             (orderType === 'liveOrders' && !allItemsComplete);
         }
       }
+      
       setOrders(prevOrders => {
         if (!belongsInCurrentView) {
           return prevOrders.filter(order =>
@@ -170,11 +167,12 @@ const Table = ({ orderType }) => {
             order.order_number !== updatedOrder.order_number
           );
         }
+        
         const existingOrderIndex = prevOrders.findIndex(order =>
           order._id === updatedOrder._id ||
           order.order_number === updatedOrder.order_number
         );
-
+    
         if (existingOrderIndex >= 0) {
           console.log('🔄 Updating existing order:', updatedOrder.order_number);
           const newOrders = [...prevOrders];
@@ -199,12 +197,12 @@ const Table = ({ orderType }) => {
     const handleOrderCreated = (data) => {
       const newOrder = data.order;
       if (!newOrder || !newOrder._id) return;
-
+    
       console.log('📥 New order received via socket:', newOrder.order_number);
-
+    
       // Determine if this order belongs in current view
       let belongsInCurrentView = false;
-
+    
       if (user.role === 'admin' || user.role === 'dispatcher') {
         const isCompleted = newOrder.order_status?.toLowerCase() === 'completed';
         belongsInCurrentView = (
@@ -212,7 +210,6 @@ const Table = ({ orderType }) => {
           (orderType === 'pastOrders' && isCompleted)
         );
       } else {
-        // For team users, check if all team items are complete
         const teamType = determineTeamType(user.team);
         if (teamType && newOrder.order_details && newOrder.order_details[teamType]) {
           const teamItems = newOrder.order_details[teamType];
@@ -224,25 +221,34 @@ const Table = ({ orderType }) => {
             (orderType === 'liveOrders' && !allItemsComplete);
         }
       }
-
+    
       if (!belongsInCurrentView) {
         console.log(`Order ${newOrder.order_number} does not belong in ${orderType} view`);
         return;
       }
+    
+      // Update state with proper deduplication
       setOrders(prevOrders => {
-
-        const exists = prevOrders.some(
+        // Check for existing order to prevent duplication
+        const existingOrderIndex = prevOrders.findIndex(
           order => order._id === newOrder._id || order.order_number === newOrder.order_number
         );
-        if (exists) return prevOrders;
-
+        
+        if (existingOrderIndex >= 0) {
+          console.log(`Order ${newOrder.order_number} already exists in ${orderType} view`);
+          return prevOrders;
+        }
+    
         // Add to current view
         console.log(`Adding order ${newOrder.order_number} to ${orderType} view`);
         const updated = [...prevOrders, newOrder];
+        
+        // Save to localStorage
         saveOrdersToLocalStorage(user, updated, orderType);
         return updated;
       });
     };
+    
 
     socket.on('order-created', handleOrderCreated);
     return () => socket.off('order-created', handleOrderCreated);
@@ -259,26 +265,26 @@ const Table = ({ orderType }) => {
         console.warn("🚫 Skipping invalid order (missing _id):", orderToAdd);
         return;
       }
-      const isDuplicate = orders.some(
-        existingOrder =>
-          existingOrder._id === orderToAdd._id ||
-          (existingOrder.order_number === orderToAdd.order_number && orderToAdd.order_number)
-      );
-      if (isDuplicate) {
-        console.warn("⚠️ Order already exists in local state:", orderToAdd.order_number);
-        return;
-      }
       setOrders(prevOrders => {
-        const updatedOrders = [...prevOrders, orderToAdd];
-        saveOrdersToLocalStorage(user, updatedOrders);
-        return updatedOrders;
+        const isDuplicate = prevOrders.some(
+          existingOrder => existingOrder._id === orderToAdd._id ||
+            existingOrder.order_number === orderToAdd.order_number
+        );
+        
+        if (isDuplicate) {
+          console.warn("⚠️ Order already exists in local state:", orderToAdd.order_number);
+          return prevOrders;
+        }
+        
+        return [...prevOrders, orderToAdd];
       });
+      
       toast.success("Order created successfully!");
     } catch (error) {
       console.error("Error handling order creation:", error);
       toast.error("Failed to create order");
     }
-  }
+  };
 
   const handleClose = () => {
     setShowModal(false);

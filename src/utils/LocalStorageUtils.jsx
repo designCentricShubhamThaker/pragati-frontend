@@ -7,7 +7,7 @@ export const generateLocalStorageKey = (user, orderType) => {
   }
 
   const validOrderType = orderType || 'liveOrders';
-  console.log(`Generating key for user ${user.name || 'unknown'}, role: ${user.role}, orderType: ${validOrderType}`);
+  // console.log(`Generating key for user ${user.name || 'unknown'}, role: ${user.role}, orderType: ${validOrderType}`);
   if (user.role === 'admin' || user.role === 'dispatcher') {
     return `dispatcher_${validOrderType}`;
   }

@@ -28,8 +28,6 @@ const DispatcherDashboard = () => {
     window.location.href = '/login';
   };
 
-  /////////////////////
-  // Improved updateStatusCounts function
   const updateStatusCounts = useCallback(() => {
     try {
       const liveOrders = JSON.parse(localStorage.getItem("dispatcher_liveOrders") || '[]');
@@ -44,20 +42,17 @@ const DispatcherDashboard = () => {
     }
   }, []);
   
-  // Initial load of status counts
   useEffect(() => {
     updateStatusCounts();
-    // Set up interval to periodically check for changes
     const intervalId = setInterval(updateStatusCounts, 3000);
     return () => clearInterval(intervalId);
   }, [updateStatusCounts]);
 
-  // Socket event listeners for real-time updates
   useEffect(() => {
     if (!socket || !isConnected) return;
     
     const handleOrderChange = () => {
-      setTimeout(updateStatusCounts, 100); // Add slight delay to ensure localStorage is updated
+      setTimeout(updateStatusCounts, 100); 
     };
     
     socket.on('order-created', handleOrderChange);
@@ -71,10 +66,9 @@ const DispatcherDashboard = () => {
     };
   }, [socket, isConnected, updateStatusCounts]);
 
-  // Listen for custom events from Table component
   useEffect(() => {
     const handleLocalUpdate = () => {
-      setTimeout(updateStatusCounts, 100); // Add slight delay to ensure localStorage is updated first
+      setTimeout(updateStatusCounts, 100); 
     };
     
     window.addEventListener('orderDataChanged', handleLocalUpdate);
@@ -84,7 +78,6 @@ const DispatcherDashboard = () => {
     };
   }, [updateStatusCounts]);
 
-  // Add event listener for storage changes
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key && (e.key === "dispatcher_liveOrders" || e.key === "dispatcher_pastOrders")) {
@@ -95,7 +88,7 @@ const DispatcherDashboard = () => {
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [updateStatusCounts]);
-  ////////////////////////////////
+
   
 
   useEffect(() => {

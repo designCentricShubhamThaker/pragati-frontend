@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, X, Menu } from 'lucide-react';
 import { useAuth } from './context/auth';
 import { useNavigate } from 'react-router-dom';
@@ -7,14 +7,21 @@ import { LuCalendarClock } from "react-icons/lu";
 import { FaCheck } from "react-icons/fa";
 import ConnectionStatus from './components/ConnectionStatus';
 import { FaPowerOff } from "react-icons/fa";
+import { useSocket } from './context/SocketContext';
+import { generateLocalStorageKey } from './utils/LocalStorageUtils';
 const TeamView = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('liveOrders');
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+   const [statusCounts, setStatusCounts] = useState({
+      pendingOrdersCount: 0,
+      completedOrderCount: 0
+    });
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+    const { socket, isConnected } = useSocket();
 
   const handleLogout = () => {
     logout();
@@ -46,35 +53,79 @@ const TeamView = () => {
     { id: 'liveOrders', label: 'LIVE ORDERS' },
     { id: 'pastOrders', label: 'PAST ORDERS' },
   ];
-
-  const getStatusCount = () => {
-    const data = localStorage.getItem("dispatcher_all_orders");
-    let allOrders = [];
-
-    if (data) {
-      try {
-        allOrders = JSON.parse(data);
-        if (!Array.isArray(allOrders)) {
-          allOrders = [];
-        }
-      } catch (error) {
-        allOrders = [];
+  const updateStatusCounts = useCallback(() => {
+    try {
+      if (!user) {
+        console.warn("User is not defined. Cannot fetch order data.");
+        return;
       }
+  
+      const liveOrdersKey = generateLocalStorageKey(user, "liveOrders");
+      const pastOrdersKey = generateLocalStorageKey(user, "pastOrders");
+  
+      const liveOrders = JSON.parse(localStorage.getItem(liveOrdersKey) || '[]');
+      const pastOrders = JSON.parse(localStorage.getItem(pastOrdersKey) || '[]');
+  
+      setStatusCounts({
+        pendingOrdersCount: liveOrders.length,
+        completedOrderCount: pastOrders.length
+      });
+    } catch (error) {
+      console.error("Error updating status counts:", error);
     }
+  }, [user]);
 
-    let pendingOrdersCount = 0;
-    let completedOrderCount = 0;
-
-    allOrders.forEach((e) => {
-      if (e.order_status === "Pending") {
-        pendingOrdersCount += 1;
-      } else {
-        completedOrderCount += 1;
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key && (e.key === "dispatcher_liveOrders" || e.key === "dispatcher_pastOrders")) {
+        updateStatusCounts();
       }
-    });
-
-    return { pendingOrdersCount, completedOrderCount };
-  };
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [updateStatusCounts]);
+  
+    
+  useEffect(() => {
+    updateStatusCounts();
+    const intervalId = setInterval(updateStatusCounts, 3000);
+    return () => clearInterval(intervalId);
+  }, [updateStatusCounts]);
+  
+  
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+  
+    const handleOrderChange = () => {
+      setTimeout(updateStatusCounts, 100);
+    };
+  
+    socket.on('order-created', handleOrderChange);
+    socket.on('order-updated', handleOrderChange);
+    socket.on('orderDeleted', handleOrderChange);
+    socket.on('order-edited', handleOrderChange);
+  
+    return () => {
+      socket.off('order-created', handleOrderChange);
+      socket.off('order-updated', handleOrderChange);
+      socket.off('orderDeleted', handleOrderChange);
+      socket.off('order-edited', handleOrderChange);
+    };
+  }, [socket, isConnected, updateStatusCounts]);
+  
+  
+  useEffect(() => {
+    const handleLocalUpdate = () => {
+      setTimeout(updateStatusCounts, 100);
+    };
+  
+    window.addEventListener('orderDataChanged', handleLocalUpdate);
+    return () => window.removeEventListener('orderDataChanged', handleLocalUpdate);
+  }, [updateStatusCounts]);
+  
+  
+    
 
   const MobileSidebar = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-40 flex md:hidden">
@@ -170,14 +221,13 @@ const TeamView = () => {
           <div className='flex gap-3'>
             <div className="px-2">
               <div className="flex gap-3">
-                {/* Pending Orders Indicator */}
                 <div className="bg-orange-50 rounded-lg border border-orange-200 shadow-sm overflow-hidden flex items-center">
                   <div className="flex items-center gap-2 py-2 px-3">
                     <div className="text-orange-500">
                       <LuCalendarClock size={18} />
                     </div>
                     <div className="flex items-center">
-                      <span className="text-2xl font-bold text-orange-500 mr-2">{getStatusCount().pendingOrdersCount}</span>
+                    <span className="text-2xl font-bold text-orange-500 mr-2">{statusCounts.pendingOrdersCount}</span>
                       <div className="flex flex-col">
                         <span className="text-gray-700 text-sm font-medium">Pending Orders</span>
                         <span className="text-xs text-gray-500">orders awaiting processing</span>
@@ -186,14 +236,13 @@ const TeamView = () => {
                   </div>
                 </div>
 
-                {/* Completed Orders Indicator */}
                 <div className="bg-green-50 rounded-lg border border-green-200 shadow-sm overflow-hidden flex items-center">
                   <div className="flex items-center gap-2 py-2 px-3">
                     <div className="text-green-600">
                       <FaCheck size={16} />
                     </div>
                     <div className="flex items-center">
-                      <span className="text-2xl font-bold text-green-600 mr-2">{getStatusCount().completedOrderCount}</span>
+                    <span className="text-2xl font-bold text-green-600 mr-2">{statusCounts.completedOrderCount}</span>
                       <div className="flex flex-col">
                         <span className="text-gray-700 text-sm font-medium">Completed Orders</span>
                         <span className="text-xs text-gray-500">orders successfully fulfilled</span>
