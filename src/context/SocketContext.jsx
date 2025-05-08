@@ -20,7 +20,10 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    const socketUrl = 'https://pragati-backend-omid.onrender.com/'
+  const socketUrl = io('https://pragati-backend-omid.onrender.com', {
+  transports: ['websocket'],       // ✅ Force pure websocket
+  withCredentials: true            // ✅ Send credentials (cookies, etc.)
+});
     //  'http://localhost:5000'
 
     const socketInstance = io(socketUrl, {
