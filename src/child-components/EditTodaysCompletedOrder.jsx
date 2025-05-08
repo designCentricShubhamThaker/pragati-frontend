@@ -138,7 +138,7 @@ const EditTodaysCompletedOrder = ({ onClose, selectedOrder, onOrderUpdated, team
       console.log("Update payload:", updatePayload);
   
       const response = await axios.patch(
-        "https://pragati-backend-omid.onrender.com/update-progress",
+        "https://pragati-backend-omid.onrender.com/orders/update-progress",
         updatePayload
       );
   

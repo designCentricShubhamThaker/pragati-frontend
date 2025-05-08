@@ -20,19 +20,16 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-  const socketUrl = io('https://pragati-backend-omid.onrender.com', {
-  transports: ['websocket'],       // ✅ Force pure websocket
-  withCredentials: true            // ✅ Send credentials (cookies, etc.)
-});
-    //  'http://localhost:5000'
+    const SOCKET_URL = 'https://pragati-backend-omid.onrender.com';
 
-    const socketInstance = io(socketUrl, {
+    const socketInstance = io(SOCKET_URL, {
       withCredentials: true,
-      transports: ['websocket', 'polling'],
+      // Try polling first, then fallback to websocket
+      transports: ['polling', 'websocket'], // Changed order to try polling first
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: 40000,
       autoConnect: true,
       query: {
         userId: user.id || 'anonymous',
@@ -41,7 +38,6 @@ export const SocketProvider = ({ children }) => {
         teamType: user.teamType || user.team || 'unknown'
       }
     });
-
     const handleConnect = () => {
       console.log('🔌 Socket connected with ID:', socketInstance.id);
       setIsConnected(true);

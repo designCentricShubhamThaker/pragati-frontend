@@ -99,7 +99,7 @@ const Table = ({ orderType }) => {
     try {
       setIsLoading(true);
       console.log(`Fetching orders for type: ${orderType}, user role: ${user?.role}`);
-      const response = await axios.get(`https://pragati-backend-omid.onrender.com//orders/${orderType}`, {
+      const response = await axios.get(`https://pragati-backend-omid.onrender.com/orders/${orderType}`, {
         params: {
           role: user?.role,
           team: user?.team

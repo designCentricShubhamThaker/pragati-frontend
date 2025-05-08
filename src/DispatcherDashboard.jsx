@@ -157,7 +157,7 @@ const DispatcherDashboard = () => {
       <ToastContainer />
       {!isMobile && (
         <div
-          className={`bg-[url('./bg2.jpg')] bg-cover bg-center text-white flex flex-col transition-all duration-300 
+         className={`bg-[url('/bg2.jpg')] bg-cover bg-center text-white flex flex-col transition-all duration-300 
           ${collapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-64'}`}
         >
           <div className="flex items-center p-4 border-b border-orange-400">
