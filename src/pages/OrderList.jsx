@@ -40,7 +40,6 @@ function customGlobalFilter(rows, columnIds, filterValue) {
     });
   });
 }
-
 const OrdersList = ({ orderType }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +58,7 @@ const OrdersList = ({ orderType }) => {
 
   useEffect(() => {
     const storedOrders = getOrdersFromLocalStorage(user, orderType);
-    if (storedOrders.length > 0) {
+    if (storedOrders && storedOrders.length > 0) {
       setOrders(storedOrders);
       setLoading(false);
     } else {
@@ -75,7 +74,6 @@ const OrdersList = ({ orderType }) => {
     return cleanup;
   }, [user, orderType]);
 
-
   const isOrderRelevantForTeam = useCallback((order, teamType) => {
     if (!order || !order.order_details) return false;
     if (user.role === 'admin' || user.role === 'dispatcher') return true;
@@ -89,7 +87,6 @@ const OrdersList = ({ orderType }) => {
       case 'pumps':
         return order.order_details.pumps && order.order_details.pumps.length > 0;
       case 'all':
-
         return (
           (order.order_details.glass && order.order_details.glass.length > 0) ||
           (order.order_details.caps && order.order_details.caps.length > 0) ||
@@ -107,9 +104,24 @@ const OrdersList = ({ orderType }) => {
       const response = await axios.get(`http://localhost:5000/orders/${orderType}`, {
         params: { team: user.team }
       });
-
-      const updatedOrders = updateLocalStorageOrders(user, response.data.orders, orderType);
-      setOrders(updatedOrders);
+      
+      // Check the structure of the response
+      console.log("API Response:", response.data);
+      
+      // Extract orders data properly
+      const ordersData = response.data.orders || response.data;
+      
+      if (!Array.isArray(ordersData)) {
+        console.error("Expected orders array but got:", ordersData);
+        setLoading(false);
+        return;
+      }
+      
+      // Save to localStorage directly
+      saveOrdersToLocalStorage(user, ordersData, orderType);
+      
+      // Set state with fetched orders
+      setOrders(ordersData);
     } catch (error) {
       console.error("Error fetching orders:", error);
     } finally {
@@ -123,12 +135,12 @@ const OrdersList = ({ orderType }) => {
     const handleSocketNewOrder = (data) => {
       console.log(`🔌 Socket received new order: Order #${data.order?.order_number}`);
 
-      if (isOrderRelevantForTeam(data.order)) {
+      if (isOrderRelevantForTeam(data.order, teamType)) {
         setOrders(prevOrders => {
           const exists = prevOrders.some(o => o._id === data.order._id);
           if (exists) return prevOrders;
           const newOrders = [...prevOrders, data.order];
-          saveOrdersToLocalStorage(user, newOrders);
+          saveOrdersToLocalStorage(user, newOrders, orderType);
 
           setNewOrderAlert({
             id: data.order._id,
@@ -235,21 +247,19 @@ const OrdersList = ({ orderType }) => {
       socket.off('order-edited', handleSocketOrderEdited);
       socket.off('order-deleted', handleSocketOrderDeleted);
     };
-  }, [socket, user, isOrderRelevantForTeam, teamType]);
+  }, [socket, user, isOrderRelevantForTeam, teamType, orderType]);
 
   useEffect(() => {
-
     const handleNewOrder = (event) => {
       const { order } = event.detail;
 
       if (isOrderRelevantForTeam(order, teamType)) {
         setOrders(prevOrders => {
-
           const exists = prevOrders.some(o => o._id === order._id);
           if (exists) return prevOrders;
 
           const newOrders = [...prevOrders, order];
-          saveOrdersToLocalStorage(user, newOrders);
+          saveOrdersToLocalStorage(user, newOrders, orderType);
           setNewOrderAlert({
             id: order._id,
             number: order.order_number,
@@ -271,7 +281,7 @@ const OrdersList = ({ orderType }) => {
           prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
         );
 
-        saveOrdersToLocalStorage(user, updatedOrders);
+        saveOrdersToLocalStorage(user, updatedOrders, orderType);
         return updatedOrders;
       });
     };
@@ -284,7 +294,7 @@ const OrdersList = ({ orderType }) => {
         const updatedOrders = prevOrders.map(prevOrder =>
           prevOrder._id === order._id ? { ...order, lastUpdatedTimestamp: new Date().toISOString() } : prevOrder
         );
-        saveOrdersToLocalStorage(user, updatedOrders);
+        saveOrdersToLocalStorage(user, updatedOrders, orderType);
         const syncEvent = new CustomEvent('localStorageUpdated', {
           detail: {
             key: generateLocalStorageKey(user),
@@ -316,7 +326,7 @@ const OrdersList = ({ orderType }) => {
       window.removeEventListener('orderEdited', handleOrderEdited);
       window.removeEventListener('orderDeleted', handleOrderDeleted);
     };
-  }, [user, isOrderRelevantForTeam, teamType]);
+  }, [user, isOrderRelevantForTeam, teamType, orderType]);
 
   const handleOrderUpdated = useCallback((updatedOrder) => {
     const teamType = determineTeamType(user.team);
@@ -356,7 +366,6 @@ const OrdersList = ({ orderType }) => {
         return filteredOrders;
       });
     }
-
     else {
       setOrders(prevOrders => {
         const updatedOrders = prevOrders.map(order =>
@@ -372,6 +381,7 @@ const OrdersList = ({ orderType }) => {
     }
   }, [user, orderType]);
 
+ 
   const handleEditOrder = useCallback((order) => {
     setSelectedOrder(order);
     setShowModal(true);
