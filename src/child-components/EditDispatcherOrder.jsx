@@ -309,7 +309,7 @@ const EditDispatcherOrder = ({ onClose, orders, onSave, user }) => {
       }));
 
       const response = await axios.put(
-        `http://localhost:5000/orders/${updatedOrder._id || updatedOrder.order_number}`,
+        `https://pragati-backend-omid.onrender.com/orders/${updatedOrder._id || updatedOrder.order_number}`,
         updatedOrder
       );
 

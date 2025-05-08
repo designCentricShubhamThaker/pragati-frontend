@@ -181,7 +181,7 @@ const CreateOrder = ({ onClose, onCreateOrder }) => {
     };
 
     try {
-      const response = await axios.post("http://localhost:5000/orders", newOrder);
+      const response = await axios.post("https://pragati-backend-omid.onrender.com/orders", newOrder);
       const createdOrder = response.data.order;
 
       if (onCreateOrder) {

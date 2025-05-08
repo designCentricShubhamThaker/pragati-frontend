@@ -20,9 +20,8 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    const socketUrl = process.env.NODE_ENV === 'production'
-      ? 'https://your-production-url'
-      : 'http://localhost:5000';
+    const socketUrl = 'https://pragati-backend-omid.onrender.com/'
+    //  'http://localhost:5000'
 
     const socketInstance = io(socketUrl, {
       withCredentials: true,

@@ -112,7 +112,7 @@ const DeleteOrder = ({
       deleteOrderFromLocalStorage(user, orderNumber);
   
       // Then delete from database
-      const response = await fetch(`http://localhost:5000/orders/${orderNumber}`, {
+      const response = await fetch(`https://pragati-backend-omid.onrender.com/orders/${orderNumber}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

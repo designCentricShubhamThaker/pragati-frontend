@@ -101,7 +101,7 @@ const OrdersList = ({ orderType }) => {
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`http://localhost:5000/orders/${orderType}`, {
+      const response = await axios.get(`https://pragati-backend-omid.onrender.com/orders/${orderType}`, {
         params: { team: user.team }
       });
       
